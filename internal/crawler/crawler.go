@@ -1,14 +1,15 @@
 package crawler
 
 import (
+	"fmt"
 	"io/fs"
 	"path/filepath"
+	"syscall"
 )
 
 type FileMetadata struct {
-	RootPath     string
-	RelativePath string
 	AbsolutePath string
+	FileID       string
 	SizeBytes    int64
 	ModifiedAtNS int64
 }
@@ -39,15 +40,14 @@ func CollectFileMetadata(root string) ([]FileMetadata, error) {
 		}
 
 		absolutePath := filepath.Clean(path)
-		relativePath, err := filepath.Rel(rootAbs, absolutePath)
+		fileID, err := fileIDFromInfo(info)
 		if err != nil {
 			return err
 		}
 
 		files = append(files, FileMetadata{
-			RootPath:     rootAbs,
-			RelativePath: relativePath,
 			AbsolutePath: absolutePath,
+			FileID:       fileID,
 			SizeBytes:    info.Size(),
 			ModifiedAtNS: info.ModTime().UnixNano(),
 		})
@@ -59,4 +59,13 @@ func CollectFileMetadata(root string) ([]FileMetadata, error) {
 	}
 
 	return files, nil
+}
+
+func fileIDFromInfo(info fs.FileInfo) (string, error) {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return "", fmt.Errorf("file %q does not expose syscall stat metadata", info.Name())
+	}
+
+	return fmt.Sprintf("%d:%d", stat.Dev, stat.Ino), nil
 }

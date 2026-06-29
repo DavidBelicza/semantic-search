@@ -8,24 +8,20 @@ import (
 
 const documentUpsertBatchSize = 500
 
-type DocumentStore interface {
+type MetadataStore interface {
 	UpsertDocuments(ctx context.Context, files []crawler.FileMetadata) error
 }
 
-func IndexPath(ctx context.Context, store DocumentStore, rootPath string) error {
+func IndexPath(ctx context.Context, store MetadataStore, rootPath string) error {
 	files, err := crawler.CollectFileMetadata(rootPath)
 	if err != nil {
 		return err
 	}
 
-	if err := upsertDocumentsInBatches(ctx, store, files); err != nil {
-		return err
-	}
-
-	return nil
+	return upsertDocumentsInBatches(ctx, store, files)
 }
 
-func upsertDocumentsInBatches(ctx context.Context, store DocumentStore, files []crawler.FileMetadata) error {
+func upsertDocumentsInBatches(ctx context.Context, store MetadataStore, files []crawler.FileMetadata) error {
 	for start := 0; start < len(files); start += documentUpsertBatchSize {
 		end := start + documentUpsertBatchSize
 		if end > len(files) {

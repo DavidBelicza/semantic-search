@@ -33,8 +33,8 @@ func TestCollectFileMetadataReturnsRecursiveRegularFiles(t *testing.T) {
 	var gotPaths []string
 	for _, file := range got {
 		gotPaths = append(gotPaths, file.AbsolutePath)
-		if file.RootPath != root {
-			t.Fatalf("root path mismatch: want %q, got %q", root, file.RootPath)
+		if file.FileID == "" {
+			t.Fatalf("file id was not set for %q", file.AbsolutePath)
 		}
 		if file.SizeBytes != 4 {
 			t.Fatalf("size mismatch for %q: want 4, got %d", file.AbsolutePath, file.SizeBytes)

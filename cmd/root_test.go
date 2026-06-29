@@ -20,7 +20,7 @@ func TestNewRootCommandShowsHelp(t *testing.T) {
 		t.Fatalf("help output does not contain app name %q: %q", appName, help)
 	}
 
-	for _, commandName := range []string{"index", "search"} {
+	for _, commandName := range []string{"index", "scan", "search"} {
 		if !strings.Contains(help, commandName) {
 			t.Fatalf("help output does not contain %q command: %q", commandName, help)
 		}

@@ -5,13 +5,21 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"semantic-search/internal/chunker"
 	"semantic-search/internal/indexer"
+	"semantic-search/internal/scanner"
 )
 
 const appName = "semantic-search"
 const DefaultDatabasePath = "vector-index.db"
 
-func NewRootCommand(out io.Writer, store indexer.DocumentStore) *cobra.Command {
+type AppStore interface {
+	indexer.MetadataStore
+	scanner.Store
+	chunker.Store
+}
+
+func NewRootCommand(out io.Writer, store AppStore) *cobra.Command {
 	var databasePath string
 
 	rootCmd := &cobra.Command{
@@ -26,6 +34,7 @@ func NewRootCommand(out io.Writer, store indexer.DocumentStore) *cobra.Command {
 	rootCmd.SetOut(out)
 	rootCmd.SetErr(out)
 	rootCmd.AddCommand(NewIndexCommand(out, store))
+	rootCmd.AddCommand(NewScanCommand(out, store))
 	rootCmd.AddCommand(NewSearchCommand(out))
 
 	return rootCmd

@@ -266,16 +266,19 @@ Use a Vectorlite virtual table for the chunk vectors.
 ```sql
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    root_path TEXT NOT NULL,
-    relative_path TEXT NOT NULL,
+    file_id TEXT NOT NULL,
     absolute_path TEXT NOT NULL,
     file_size INTEGER NOT NULL,
     modified_at_ns INTEGER NOT NULL,
-    content_hash TEXT NOT NULL,
+    content_hash TEXT,
+    scanned_file_size INTEGER,
+    scanned_modified_at_ns INTEGER,
+    status TEXT NOT NULL DEFAULT 'indexed'
+        CHECK(status IN ('indexed', 'scanned', 'chunked', 'embedded', 'done', 'failed')),
     title TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(root_path, relative_path)
+    UNIQUE(file_id)
 );
 ```
 
@@ -288,8 +291,8 @@ CREATE TABLE IF NOT EXISTS chunks (
     chunk_index INTEGER NOT NULL,
     text TEXT NOT NULL,
     token_count INTEGER NOT NULL,
-    start_offset INTEGER,
-    end_offset INTEGER,
+    start_offset INTEGER NOT NULL,
+    end_offset INTEGER NOT NULL,
     content_hash TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(document_id) REFERENCES documents(id) ON DELETE CASCADE,
@@ -329,7 +332,6 @@ embedding_dimensions
 distance_metric
 chunk_max_tokens
 chunk_overlap_tokens
-root_path
 ```
 
 ### 7.5 Vector table
@@ -402,10 +404,10 @@ Prevent duplicate indexing when symlinks or alternate paths resolve to the same 
 A document is identified by:
 
 ```text
-root_path + relative_path
+file_id
 ```
 
-Do not rely only on an absolute path because the root directory may be moved.
+Use the filesystem identity derived from device ID and inode when available.
 
 Store the current absolute path for convenience.
 
@@ -472,13 +474,15 @@ Chunking must not use an LLM.
 
 ### 10.1 Requirements
 
-- Maximum of 500 model tokens by default.
+- Maximum of 300 estimated tokens by default in the initial implementation.
 - Configurable token overlap.
 - Prefer natural Markdown boundaries.
 - Do not split a sentence unless the sentence itself exceeds the token limit.
 - Do not split a fenced code block unless it exceeds the token limit.
 - Preserve chunk order.
 - Produce deterministic output for identical input and configuration.
+
+The initial implementation uses a replaceable chunking strategy interface and a basic hard-limit chunker. It estimates token count from average token length and cuts text at the configured token budget. More advanced Markdown-aware strategies can replace this implementation later without changing the pipeline shape.
 
 ### 10.2 Boundary priority
 
@@ -700,15 +704,20 @@ When a document changes:
 
 Because Vectorlite virtual-table operations may have transaction-specific behavior, verify atomicity with the selected Vectorlite version.
 
-If Vectorlite cannot participate safely in the same transaction, implement recoverable two-phase indexing and mark documents with an indexing state:
+Document processing is staged with an explicit status:
 
 ```text
-pending
-ready
+indexed
+scanned
+chunked
+embedded
+done
 failed
 ```
 
-Search must only include `ready` documents.
+The CLI `index` command orchestrates the internal stages in order. The index stage crawls and stores filesystem metadata, then marks records as `indexed`. The scan stage reads `indexed` records one by one, compares current metadata with the previous scan checkpoint, hashes files when metadata differs, stores changed content hashes, and advances records to `scanned` or `done`. The chunking stage reads `scanned` records one by one, replaces their chunk rows, and advances them to `chunked`. A later embedding stage will advance records through `embedded` and `done`.
+
+Search must only include documents that have completed the required downstream stages.
 
 ### 12.3 Missing files
 
@@ -862,7 +871,6 @@ SELECT
     c.chunk_index,
     c.text,
     c.token_count,
-    d.relative_path,
     d.absolute_path,
     d.title
 FROM chunks c
@@ -906,7 +914,6 @@ Benefits:
   "results": [
     {
       "document_id": 42,
-      "relative_path": "docs/payments/configuration.md",
       "absolute_path": "/Users/example/docs/payments/configuration.md",
       "score": 0.9123,
       "chunks": [
@@ -1193,9 +1200,8 @@ type Repository interface {
 
 ```go
 type FileCandidate struct {
-    RootPath     string
-    RelativePath string
     AbsolutePath string
+    FileID       string
     Size         int64
     ModifiedAtNS int64
 }
@@ -1209,8 +1215,7 @@ type DocumentContent struct {
 
 type Document struct {
     ID           int64
-    RootPath     string
-    RelativePath string
+    FileID       string
     AbsolutePath string
     FileSize     int64
     ModifiedAtNS int64
@@ -1232,7 +1237,6 @@ type Chunk struct {
 
 type SearchResult struct {
     DocumentID   int64
-    RelativePath string
     AbsolutePath string
     Title        string
     Score        float64

@@ -56,6 +56,14 @@ func TestIndexPathStoresMetadata(t *testing.T) {
 	if count != 2 {
 		t.Fatalf("document count mismatch: want 2, got %d", count)
 	}
+
+	var indexedCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM documents WHERE status = ?", storage.DocumentStatusIndexed).Scan(&indexedCount); err != nil {
+		t.Fatalf("count indexed documents: %v", err)
+	}
+	if indexedCount != 2 {
+		t.Fatalf("indexed document count mismatch: want 2, got %d", indexedCount)
+	}
 }
 
 func TestUpsertDocumentsInBatchesUsesFixedBatchSize(t *testing.T) {

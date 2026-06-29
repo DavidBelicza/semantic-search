@@ -1,0 +1,99 @@
+package scanner
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"os"
+
+	"semantic-search/internal/storage"
+)
+
+const scanBatchSize = 1
+
+type Store interface {
+	DocumentsByStatus(ctx context.Context, status string, limit int) ([]storage.Document, error)
+	UpdateDocumentContentHashAndStatus(ctx context.Context, fileID string, contentHash string, status string) error
+	UpdateDocumentScanCheckpointAndStatus(ctx context.Context, fileID string, status string) error
+}
+
+type Result struct {
+	Done    int
+	Scanned int
+}
+
+func ScanIndexedDocuments(ctx context.Context, store Store) (Result, error) {
+	var result Result
+
+	for {
+		documents, err := store.DocumentsByStatus(ctx, storage.DocumentStatusIndexed, scanBatchSize)
+		if err != nil {
+			return result, err
+		}
+		if len(documents) == 0 {
+			return result, nil
+		}
+
+		for _, document := range documents {
+			status, err := scanDocument(ctx, store, document)
+			if err != nil {
+				return result, err
+			}
+
+			switch status {
+			case storage.DocumentStatusDone:
+				result.Done++
+			case storage.DocumentStatusScanned:
+				result.Scanned++
+			}
+		}
+	}
+}
+
+func scanDocument(ctx context.Context, store Store, document storage.Document) (string, error) {
+	if document.HasHash && document.HasScannedMetadata &&
+		document.FileSize == document.ScannedFileSize &&
+		document.ModifiedAtNS == document.ScannedModifiedAtNS {
+		if err := store.UpdateDocumentScanCheckpointAndStatus(ctx, document.FileID, storage.DocumentStatusDone); err != nil {
+			return "", fmt.Errorf("mark unchanged document done %q: %w", document.AbsolutePath, err)
+		}
+
+		return storage.DocumentStatusDone, nil
+	}
+
+	contentHash, err := HashFile(document.AbsolutePath)
+	if err != nil {
+		return "", fmt.Errorf("hash file %q: %w", document.AbsolutePath, err)
+	}
+
+	if document.HasHash && document.ContentHash == contentHash {
+		if err := store.UpdateDocumentScanCheckpointAndStatus(ctx, document.FileID, storage.DocumentStatusDone); err != nil {
+			return "", fmt.Errorf("mark same-hash document done %q: %w", document.AbsolutePath, err)
+		}
+
+		return storage.DocumentStatusDone, nil
+	}
+
+	if err := store.UpdateDocumentContentHashAndStatus(ctx, document.FileID, contentHash, storage.DocumentStatusScanned); err != nil {
+		return "", fmt.Errorf("update scanned document %q: %w", document.AbsolutePath, err)
+	}
+
+	return storage.DocumentStatusScanned, nil
+}
+
+func HashFile(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}

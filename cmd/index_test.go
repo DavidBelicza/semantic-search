@@ -40,7 +40,7 @@ func TestNewIndexCommandRequiresPath(t *testing.T) {
 	}
 }
 
-func TestNewIndexCommandStoresRecursiveFileMetadata(t *testing.T) {
+func TestNewIndexCommandStoresMetadataAndScansContent(t *testing.T) {
 	root := t.TempDir()
 	dbPath := filepath.Join(t.TempDir(), "index.db")
 	nested := filepath.Join(root, "notes", "daily")
@@ -93,10 +93,42 @@ func TestNewIndexCommandStoresRecursiveFileMetadata(t *testing.T) {
 	if count != 3 {
 		t.Fatalf("document count mismatch: want 3, got %d", count)
 	}
+
+	var chunkedCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM documents WHERE content_hash IS NOT NULL AND status = ?", storage.DocumentStatusChunked).Scan(&chunkedCount); err != nil {
+		t.Fatalf("count chunked documents: %v", err)
+	}
+	if chunkedCount != 3 {
+		t.Fatalf("chunked document count mismatch: want 3, got %d", chunkedCount)
+	}
+
+	var chunkCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM chunks").Scan(&chunkCount); err != nil {
+		t.Fatalf("count chunks: %v", err)
+	}
+	if chunkCount != 3 {
+		t.Fatalf("chunk count mismatch: want 3, got %d", chunkCount)
+	}
 }
 
 type fakeDocumentStore struct{}
 
 func (s *fakeDocumentStore) UpsertDocuments(ctx context.Context, files []crawler.FileMetadata) error {
+	return nil
+}
+
+func (s *fakeDocumentStore) DocumentsByStatus(ctx context.Context, status string, limit int) ([]storage.Document, error) {
+	return nil, nil
+}
+
+func (s *fakeDocumentStore) UpdateDocumentContentHashAndStatus(ctx context.Context, fileID string, contentHash string, status string) error {
+	return nil
+}
+
+func (s *fakeDocumentStore) UpdateDocumentScanCheckpointAndStatus(ctx context.Context, fileID string, status string) error {
+	return nil
+}
+
+func (s *fakeDocumentStore) ReplaceDocumentChunksAndStatus(ctx context.Context, documentID int64, chunks []storage.Chunk, status string) error {
 	return nil
 }
