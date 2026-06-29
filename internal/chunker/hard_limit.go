@@ -5,9 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"math"
-	"os"
 
 	"semantic-search/internal/storage"
 )
@@ -15,7 +13,6 @@ import (
 const (
 	DefaultMaxTokens          = 300
 	DefaultAverageTokenLength = 4
-	chunkBatchSize            = 1
 )
 
 type Input struct {
@@ -25,15 +22,6 @@ type Input struct {
 
 type Strategy interface {
 	Chunk(ctx context.Context, input Input) ([]storage.Chunk, error)
-}
-
-type Store interface {
-	DocumentsByStatus(ctx context.Context, status string, limit int) ([]storage.Document, error)
-	ReplaceDocumentChunksAndStatus(ctx context.Context, documentID int64, chunks []storage.Chunk, status string) error
-}
-
-type Result struct {
-	Chunked int
 }
 
 type HardLimitChunker struct {
@@ -86,41 +74,6 @@ func (c HardLimitChunker) Chunk(ctx context.Context, input Input) ([]storage.Chu
 	return chunks, nil
 }
 
-func ProcessScannedDocuments(ctx context.Context, store Store, strategy Strategy) (Result, error) {
-	var result Result
-	if strategy == nil {
-		strategy = NewHardLimitChunker(DefaultMaxTokens)
-	}
-
-	for {
-		documents, err := store.DocumentsByStatus(ctx, storage.DocumentStatusScanned, chunkBatchSize)
-		if err != nil {
-			return result, err
-		}
-		if len(documents) == 0 {
-			return result, nil
-		}
-
-		for _, document := range documents {
-			text, err := readTextFile(document.AbsolutePath)
-			if err != nil {
-				return result, fmt.Errorf("read document %q: %w", document.AbsolutePath, err)
-			}
-
-			chunks, err := strategy.Chunk(ctx, Input{Document: document, Text: text})
-			if err != nil {
-				return result, fmt.Errorf("chunk document %q: %w", document.AbsolutePath, err)
-			}
-
-			if err := store.ReplaceDocumentChunksAndStatus(ctx, document.ID, chunks, storage.DocumentStatusChunked); err != nil {
-				return result, fmt.Errorf("store chunks for %q: %w", document.AbsolutePath, err)
-			}
-
-			result.Chunked++
-		}
-	}
-}
-
 func EstimateTokenCount(text string, averageTokenLength int) int {
 	if text == "" {
 		return 0
@@ -135,19 +88,4 @@ func EstimateTokenCount(text string, averageTokenLength int) int {
 func HashText(text string) string {
 	hash := sha256.Sum256([]byte(text))
 	return hex.EncodeToString(hash[:])
-}
-
-func readTextFile(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	content, err := io.ReadAll(file)
-	if err != nil {
-		return "", err
-	}
-
-	return string(content), nil
 }

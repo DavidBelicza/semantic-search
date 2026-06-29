@@ -83,8 +83,10 @@ cmd/
 internal/
   config/
   crawler/
-  markdown/
+  reader/
+  parser/
   chunker/
+  strategy/
   tokenizer/
   embedding/
   storage/
@@ -399,6 +401,8 @@ Do not follow symlinks by default.
 
 Prevent duplicate indexing when symlinks or alternate paths resolve to the same physical file.
 
+File-type support is injected as a strategy pool object. Each file strategy declares which paths it supports and composes reader, parser, and chunker implementations from the internal packages. The index stage must skip files that are not supported by the injected strategy pool. The initial default strategy pool supports Markdown files only.
+
 ### 8.2 File identity
 
 A document is identified by:
@@ -483,6 +487,8 @@ Chunking must not use an LLM.
 - Produce deterministic output for identical input and configuration.
 
 The initial implementation uses a replaceable chunking strategy interface and a basic hard-limit chunker. It estimates token count from average token length and cuts text at the configured token budget. More advanced Markdown-aware strategies can replace this implementation later without changing the pipeline shape.
+
+Chunking can be file-type dependent. File strategies may share a chunking implementation or provide their own chunker when parsing a format requires different boundaries or extracted text.
 
 ### 10.2 Boundary priority
 

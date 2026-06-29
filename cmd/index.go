@@ -7,15 +7,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"semantic-search/internal/chunker"
 	"semantic-search/internal/indexer"
 	"semantic-search/internal/scanner"
+	"semantic-search/internal/strategy"
 )
 
 type IndexStore interface {
 	indexer.MetadataStore
 	scanner.Store
-	chunker.Store
+	strategy.Store
 }
 
 func NewIndexCommand(out io.Writer, store IndexStore) *cobra.Command {
@@ -29,7 +29,8 @@ func NewIndexCommand(out io.Writer, store IndexStore) *cobra.Command {
 			}
 
 			ctx := context.Background()
-			if err := indexer.IndexPath(ctx, store, args[0]); err != nil {
+			strategyPool := strategy.DefaultPool()
+			if err := indexer.IndexPath(ctx, store, args[0], strategyPool); err != nil {
 				return err
 			}
 
@@ -37,7 +38,7 @@ func NewIndexCommand(out io.Writer, store IndexStore) *cobra.Command {
 				return err
 			}
 
-			_, err := chunker.ProcessScannedDocuments(ctx, store, chunker.NewHardLimitChunker(chunker.DefaultMaxTokens))
+			_, err := strategy.ProcessScannedDocuments(ctx, store, strategyPool)
 			return err
 		},
 	}

@@ -12,6 +12,7 @@ import (
 
 	"semantic-search/internal/crawler"
 	"semantic-search/internal/storage"
+	"semantic-search/internal/strategy"
 )
 
 func TestIndexPathStoresMetadata(t *testing.T) {
@@ -24,7 +25,8 @@ func TestIndexPathStoresMetadata(t *testing.T) {
 
 	readmeFile := filepath.Join(root, "README.md")
 	planFile := filepath.Join(nested, "plan.md")
-	for _, file := range []string{readmeFile, planFile} {
+	ignoredFile := filepath.Join(root, "ignore.txt")
+	for _, file := range []string{readmeFile, planFile, ignoredFile} {
 		if err := os.WriteFile(file, []byte("test"), 0o644); err != nil {
 			t.Fatalf("write file %q: %v", file, err)
 		}
@@ -39,7 +41,7 @@ func TestIndexPathStoresMetadata(t *testing.T) {
 		t.Fatalf("ensure schema: %v", err)
 	}
 
-	if err := IndexPath(context.Background(), store, root); err != nil {
+	if err := IndexPath(context.Background(), store, root, strategy.DefaultPool()); err != nil {
 		t.Fatalf("index path: %v", err)
 	}
 
@@ -77,6 +79,22 @@ func TestUpsertDocumentsInBatchesUsesFixedBatchSize(t *testing.T) {
 	want := []int{documentUpsertBatchSize, documentUpsertBatchSize, 1}
 	if !reflect.DeepEqual(store.batchSizes, want) {
 		t.Fatalf("batch sizes mismatch\nwant: %#v\n got: %#v", want, store.batchSizes)
+	}
+}
+
+func TestSupportedFilesFiltersUnsupportedFiles(t *testing.T) {
+	files := []crawler.FileMetadata{
+		{AbsolutePath: "/tmp/a.md"},
+		{AbsolutePath: "/tmp/b.txt"},
+		{AbsolutePath: "/tmp/c.markdown"},
+	}
+
+	got := supportedFiles(files, strategy.DefaultPool())
+	if len(got) != 2 {
+		t.Fatalf("supported file count mismatch: want 2, got %d", len(got))
+	}
+	if got[0].AbsolutePath != "/tmp/a.md" || got[1].AbsolutePath != "/tmp/c.markdown" {
+		t.Fatalf("supported files mismatch: %#v", got)
 	}
 }
 

@@ -51,8 +51,9 @@ func TestNewIndexCommandStoresMetadataAndScansContent(t *testing.T) {
 	readmeFile := filepath.Join(root, "README.md")
 	planFile := filepath.Join(root, "notes", "plan.md")
 	entryFile := filepath.Join(nested, "entry.md")
+	ignoredFile := filepath.Join(root, "ignore.txt")
 
-	files := []string{readmeFile, planFile, entryFile}
+	files := []string{readmeFile, planFile, entryFile, ignoredFile}
 	for _, file := range files {
 		if err := os.WriteFile(file, []byte("test"), 0o644); err != nil {
 			t.Fatalf("write test file %q: %v", file, err)
