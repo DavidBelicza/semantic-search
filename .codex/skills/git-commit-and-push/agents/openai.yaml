@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Commit and Push"
+  short_description: "Commit and push changes safely"
+  default_prompt: "Use $git-commit-and-push to stage, commit, and push the current repository changes safely."
