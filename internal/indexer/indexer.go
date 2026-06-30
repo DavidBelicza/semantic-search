@@ -16,8 +16,8 @@ type FileSupport interface {
 	Supports(path string) bool
 }
 
-func IndexPath(ctx context.Context, store MetadataStore, rootPath string, support FileSupport) error {
-	files, err := crawler.CollectFileMetadata(rootPath)
+func IndexPath(ctx context.Context, store MetadataStore, rootPath string, support FileSupport, options crawler.Options) error {
+	files, err := crawler.CollectFileMetadata(rootPath, options)
 	if err != nil {
 		return err
 	}

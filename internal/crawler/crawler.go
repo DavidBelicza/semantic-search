@@ -1,10 +1,10 @@
 package crawler
 
 import (
-	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
-	"syscall"
+	"strings"
 )
 
 type FileMetadata struct {
@@ -14,7 +14,25 @@ type FileMetadata struct {
 	ModifiedAtNS int64
 }
 
-func CollectFileMetadata(root string) ([]FileMetadata, error) {
+// Options controls how the crawler traverses a directory tree.
+type Options struct {
+	IncludeHidden  bool
+	FollowSymlinks bool
+}
+
+var skippedDirectories = map[string]struct{}{
+	".git":         {},
+	".hg":          {},
+	".svn":         {},
+	"node_modules": {},
+	"vendor":       {},
+	"dist":         {},
+	"build":        {},
+	".cache":       {},
+	".Trash":       {},
+}
+
+func CollectFileMetadata(root string, options Options) ([]FileMetadata, error) {
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
@@ -28,30 +46,18 @@ func CollectFileMetadata(root string) ([]FileMetadata, error) {
 		}
 
 		if entry.IsDir() {
-			return nil
+			return directoryAction(rootAbs, path, entry, options)
 		}
 
-		info, err := entry.Info()
+		metadata, ok, err := fileMetadata(path, entry, options)
 		if err != nil {
 			return err
 		}
-		if !info.Mode().IsRegular() {
+		if !ok {
 			return nil
 		}
 
-		absolutePath := filepath.Clean(path)
-		fileID, err := fileIDFromInfo(info)
-		if err != nil {
-			return err
-		}
-
-		files = append(files, FileMetadata{
-			AbsolutePath: absolutePath,
-			FileID:       fileID,
-			SizeBytes:    info.Size(),
-			ModifiedAtNS: info.ModTime().UnixNano(),
-		})
-
+		files = append(files, metadata)
 		return nil
 	})
 	if err != nil {
@@ -61,11 +67,59 @@ func CollectFileMetadata(root string) ([]FileMetadata, error) {
 	return files, nil
 }
 
-func fileIDFromInfo(info fs.FileInfo) (string, error) {
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return "", fmt.Errorf("file %q does not expose syscall stat metadata", info.Name())
+// directoryAction decides whether to descend into a directory. The root is always
+// traversed even when its own name matches a skip rule.
+func directoryAction(rootAbs string, path string, entry fs.DirEntry, options Options) error {
+	if path == rootAbs {
+		return nil
+	}
+	if _, skip := skippedDirectories[entry.Name()]; skip {
+		return filepath.SkipDir
+	}
+	if !options.IncludeHidden && isHidden(entry.Name()) {
+		return filepath.SkipDir
 	}
 
-	return fmt.Sprintf("%d:%d", stat.Dev, stat.Ino), nil
+	return nil
+}
+
+// fileMetadata returns the metadata for a file, or ok=false when the entry should be
+// skipped (hidden, non-regular, or an unfollowed symlink).
+func fileMetadata(path string, entry fs.DirEntry, options Options) (FileMetadata, bool, error) {
+	if !options.IncludeHidden && isHidden(entry.Name()) {
+		return FileMetadata{}, false, nil
+	}
+
+	info, err := fileInfo(path, entry, options)
+	if err != nil {
+		return FileMetadata{}, false, err
+	}
+	if !info.Mode().IsRegular() {
+		return FileMetadata{}, false, nil
+	}
+
+	absolutePath := filepath.Clean(path)
+	return FileMetadata{
+		AbsolutePath: absolutePath,
+		FileID:       fileID(absolutePath, info),
+		SizeBytes:    info.Size(),
+		ModifiedAtNS: info.ModTime().UnixNano(),
+	}, true, nil
+}
+
+// fileInfo resolves symlinks to their target only when FollowSymlinks is set;
+// otherwise the symlink's own (non-regular) metadata is returned so it is skipped.
+func fileInfo(path string, entry fs.DirEntry, options Options) (fs.FileInfo, error) {
+	if entry.Type()&fs.ModeSymlink == 0 {
+		return entry.Info()
+	}
+	if !options.FollowSymlinks {
+		return entry.Info()
+	}
+
+	return os.Stat(path)
+}
+
+func isHidden(name string) bool {
+	return strings.HasPrefix(name, ".") && name != "." && name != ".."
 }

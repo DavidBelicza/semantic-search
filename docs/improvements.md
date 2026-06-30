@@ -111,49 +111,55 @@ Fully realizes §8.3 step 4 ("if the hash is unchanged, update metadata but do n
 re-embed"). A pure size/length check was rejected as unsafe — a same-size edit would
 be missed — so the content hash (read once) remains the source of truth.
 
-### L2. Always fail-fast — one embed failure aborts the whole run
-If `embedChunks` errors, the error propagates up through `Index` and stops all
-remaining documents ([pkg/workflows.go:47](../pkg/workflows.go)). The affected doc is
-left `chunked` for a later retry, but the current run abandons everything else. Spec
-§17 wants unrelated documents to keep processing unless an explicit `--fail-fast` is
-set. Add per-document error collection and a fail-fast flag.
+### L2. Always fail-fast — one embed failure aborts the whole run — ✅ done
+~~An error propagated up through `Index` and stopped all remaining documents.~~ The
+scan, scanned-processing, and chunked-processing passes now share
+`processDocumentsByStatus` ([internal/strategy/default.go](../internal/strategy/default.go),
+[internal/scanner/scanner.go](../internal/scanner/scanner.go)), which takes a
+`failFast` flag: when unset, a per-document error is collected and processing
+continues, and the joined errors are returned at the end; when set, the run stops on
+the first error. The loops paginate by ascending document id, so a failed (and
+therefore still-queued) document is not revisited within the run. `--fail-fast` is
+exposed on the `index` and `scan` commands. (§17)
 
-### L3. Cross-store ordering isn't crash-safe; no rebuild path
-LanceDB delete ([internal/strategy/default.go:208](../internal/strategy/default.go))
-runs before the SQLite chunk reconcile commits, and embedding runs after. A crash in
-between can leave SQLite and LanceDB inconsistent (chunk rows pointing at deleted
-vectors). The design treats SQLite as source of truth and LanceDB as a rebuildable
-derived index (§12.2), but nothing actually rebuilds LanceDB from SQLite. Add a
-rebuild/repair path and tighten the operation ordering.
+### L3. Cross-store ordering isn't crash-safe; no rebuild path — ✅ done
+- **Ordering:** `processScannedDocument` now applies the SQLite chunk reconcile
+  (the source of truth) and commits **before** deleting vectors from LanceDB
+  ([internal/strategy/default.go](../internal/strategy/default.go)), so a crash can
+  no longer leave committed chunk rows pointing at vectors that were already deleted.
+- **Rebuild path:** `strategy.RebuildVectors` / `semanticsearch.Rebuild` re-embed
+  every embedded document's chunks and replace their vectors, rebuilding the LanceDB
+  index from SQLite. Exposed as a new `rebuild` command. Recreates a lost or drifted
+  vector store from the source of truth. (§12.2)
 
-### L4. `UNIQUE(document_id, chunk_index)` can be violated mid-transaction on reorder
-*(latent / lower confidence)* `ApplyDocumentChunkReconcile` issues sequential
-`UPDATE chunks SET chunk_index = ...` for kept chunks
-([internal/storage/sqlite/storage.go:387](../internal/storage/sqlite/storage.go)). If
-two kept (same-hash) chunks swap positions, one UPDATE can collide with a
-not-yet-updated row's index and trip the UNIQUE constraint, aborting that document.
-Unlikely with hard-cut chunking (content shifts change hashes) but real for
-duplicated/moved identical blocks. Stage index updates to avoid transient
-collisions (e.g. two-phase, or offset then settle).
+### L4. `UNIQUE(document_id, chunk_index)` violated mid-transaction on reorder — ✅ done
+~~Sequential `UPDATE chunks SET chunk_index = ...` for kept chunks could collide with
+a not-yet-updated row when two chunks swap positions.~~ Fixed:
+`moveKeptChunksToTemporaryIndexes`
+([internal/storage/sqlite/storage.go](../internal/storage/sqlite/storage.go)) first
+moves every kept chunk to a unique negative temporary index, then applies the final
+indices, so no transient collision is possible. Verified by
+`TestApplyDocumentChunkReconcileSwapsKeptChunkIndexesWithoutUniqueViolation`.
 
 ---
 
 ## Cross-platform & crawler
 
-### C1. Indexing is broken on Windows despite Windows build support
-`fileIDFromInfo` type-asserts `info.Sys().(*syscall.Stat_t)`
-([internal/crawler/crawler.go:65](../internal/crawler/crawler.go)), which does not
-exist on Windows, so the entire crawl errors out — even though
-[link.go](../internal/storage/lancedb/link.go) and the install script ship Windows
-libs. Add a fallback file-identity scheme (§8.2 says "when available").
+### C1. Indexing is broken on Windows despite Windows build support — ✅ done
+~~`fileIDFromInfo` type-asserted `info.Sys().(*syscall.Stat_t)`, which does not exist
+on Windows, so the package would not even compile there.~~ `fileID` is now split by
+build tag: [file_id_unix.go](../internal/crawler/file_id_unix.go) uses the
+device/inode identity on Unix, and [file_id_other.go](../internal/crawler/file_id_other.go)
+falls back to the absolute path elsewhere. `crawler.go` no longer references
+`syscall`; verified by cross-compiling the package for `GOOS=windows`. (§8.2)
 
-### C2. Crawler ignores all skip rules
-`CollectFileMetadata` walks and `Stat`s *every* file, including `.git`,
-`node_modules`, `vendor`, and hidden files
-([internal/crawler/crawler.go:25](../internal/crawler/crawler.go)); extension
-filtering happens only afterward. Not incorrect, but wasteful on real repos, and the
-spec's skip-dir / hidden-file / symlink behavior and the `--include-hidden` /
-`--follow-symlinks` flags (§8.1) are absent. Filter directories during the walk.
+### C2. Crawler ignores all skip rules — ✅ done
+`CollectFileMetadata` now takes `crawler.Options{IncludeHidden, FollowSymlinks}` and
+filters during the walk: it `SkipDir`s `.git`, `.hg`, `.svn`, `node_modules`,
+`vendor`, `dist`, `build`, `.cache`, `.Trash`, skips hidden files and directories
+unless `IncludeHidden`, and follows symlinks only when `FollowSymlinks`. Wired to the
+`--include-hidden` / `--follow-symlinks` flags on the `index` command. Verified by
+`TestCollectFileMetadataSkipsVcsBuildAndHiddenByDefault`. (§8.1)
 
 ---
 

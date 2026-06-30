@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,7 +15,7 @@ import (
 const scanBatchSize = 1
 
 type Store interface {
-	DocumentsByStatus(ctx context.Context, status string, limit int) ([]storage.Document, error)
+	DocumentsByStatus(ctx context.Context, status string, afterID int64, limit int) ([]storage.Document, error)
 	UpdateDocumentContentHashAndStatus(ctx context.Context, fileID string, contentHash string, status string) error
 	UpdateDocumentScanCheckpointAndStatus(ctx context.Context, fileID string, status string) error
 }
@@ -23,22 +24,33 @@ type Result struct {
 	Scanned int
 }
 
-func ScanIndexedDocuments(ctx context.Context, store Store) (Result, error) {
+// ScanIndexedDocuments hashes indexed documents one by one. With failFast unset, a
+// per-document failure is recorded and scanning continues; the collected errors are
+// joined and returned once every document has been visited. Pagination is by ascending
+// id so a failed (and therefore still-indexed) document is not revisited in this run.
+func ScanIndexedDocuments(ctx context.Context, store Store, failFast bool) (Result, error) {
 	var result Result
+	var errs []error
+	var afterID int64
 
 	for {
-		documents, err := store.DocumentsByStatus(ctx, storage.DocumentStatusIndexed, scanBatchSize)
+		documents, err := store.DocumentsByStatus(ctx, storage.DocumentStatusIndexed, afterID, scanBatchSize)
 		if err != nil {
 			return result, err
 		}
 		if len(documents) == 0 {
-			return result, nil
+			return result, errors.Join(errs...)
 		}
 
 		for _, document := range documents {
+			afterID = document.ID
 			status, err := scanDocument(ctx, store, document)
-			if err != nil {
+			if err != nil && failFast {
 				return result, err
+			}
+			if err != nil {
+				errs = append(errs, err)
+				continue
 			}
 
 			if status == storage.DocumentStatusScanned {

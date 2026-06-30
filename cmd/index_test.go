@@ -127,7 +127,7 @@ func (s *fakeDocumentStore) UpsertDocuments(ctx context.Context, files []crawler
 	return nil
 }
 
-func (s *fakeDocumentStore) DocumentsByStatus(ctx context.Context, status string, limit int) ([]storage.Document, error) {
+func (s *fakeDocumentStore) DocumentsByStatus(ctx context.Context, status string, afterID int64, limit int) ([]storage.Document, error) {
 	return nil, nil
 }
 

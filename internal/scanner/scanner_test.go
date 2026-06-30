@@ -30,6 +30,7 @@ func TestScanIndexedDocumentsMarksSameMetadataScannedWithoutHashing(t *testing.T
 	store := &memoryScanStore{
 		documents: []storage.Document{
 			{
+				ID:                  1,
 				FileID:              "1:100",
 				AbsolutePath:        "/missing/file.md",
 				FileSize:            10,
@@ -44,7 +45,7 @@ func TestScanIndexedDocumentsMarksSameMetadataScannedWithoutHashing(t *testing.T
 		},
 	}
 
-	result, err := ScanIndexedDocuments(context.Background(), store)
+	result, err := ScanIndexedDocuments(context.Background(), store, false)
 	if err != nil {
 		t.Fatalf("scan indexed documents: %v", err)
 	}
@@ -66,6 +67,7 @@ func TestScanIndexedDocumentsHashesAndMarksScannedWhenContentChanged(t *testing.
 	store := &memoryScanStore{
 		documents: []storage.Document{
 			{
+				ID:           1,
 				FileID:       "1:100",
 				AbsolutePath: path,
 				FileSize:     11,
@@ -77,7 +79,7 @@ func TestScanIndexedDocumentsHashesAndMarksScannedWhenContentChanged(t *testing.
 		},
 	}
 
-	result, err := ScanIndexedDocuments(context.Background(), store)
+	result, err := ScanIndexedDocuments(context.Background(), store, false)
 	if err != nil {
 		t.Fatalf("scan indexed documents: %v", err)
 	}
@@ -115,13 +117,14 @@ func TestScanIndexedDocumentsRestoresEmbeddedWhenContentMatchesEmbeddedHash(t *t
 				ScannedFileSize:     5,
 				ScannedModifiedAtNS: 100,
 				HasScannedMetadata:  true,
+				ID:                  1,
 				EmbeddedContentHash: hash,
 				Status:              storage.DocumentStatusIndexed,
 			},
 		},
 	}
 
-	result, err := ScanIndexedDocuments(context.Background(), store)
+	result, err := ScanIndexedDocuments(context.Background(), store, false)
 	if err != nil {
 		t.Fatalf("scan indexed documents: %v", err)
 	}
@@ -141,14 +144,15 @@ type memoryScanStore struct {
 	documents []storage.Document
 }
 
-func (s *memoryScanStore) DocumentsByStatus(ctx context.Context, status string, limit int) ([]storage.Document, error) {
+func (s *memoryScanStore) DocumentsByStatus(ctx context.Context, status string, afterID int64, limit int) ([]storage.Document, error) {
 	var documents []storage.Document
 	for _, document := range s.documents {
-		if document.Status == status {
-			documents = append(documents, document)
-			if len(documents) == limit {
-				return documents, nil
-			}
+		if document.Status != status || document.ID <= afterID {
+			continue
+		}
+		documents = append(documents, document)
+		if len(documents) == limit {
+			return documents, nil
 		}
 	}
 

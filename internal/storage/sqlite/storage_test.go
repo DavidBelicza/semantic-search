@@ -137,7 +137,7 @@ VALUES ('1:100', '/tmp/docs/README.md', 10, 100, 'hash', 10, 100, 'scanned')`); 
 		t.Fatalf("mark embedded: %v", err)
 	}
 
-	documents, err := store.DocumentsByStatus(ctx, DocumentStatusEmbedded, 10)
+	documents, err := store.DocumentsByStatus(ctx, DocumentStatusEmbedded, 0, 10)
 	if err != nil {
 		t.Fatalf("documents by status: %v", err)
 	}
@@ -146,6 +146,66 @@ VALUES ('1:100', '/tmp/docs/README.md', 10, 100, 'hash', 10, 100, 'scanned')`); 
 	}
 	if documents[0].EmbeddedContentHash != "content-hash" {
 		t.Fatalf("embedded content hash mismatch: got %q", documents[0].EmbeddedContentHash)
+	}
+}
+
+func TestApplyDocumentChunkReconcileSwapsKeptChunkIndexesWithoutUniqueViolation(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	if err := store.EnsureSchema(ctx); err != nil {
+		t.Fatalf("ensure schema: %v", err)
+	}
+	if err := store.UpsertDocuments(ctx, []crawler.FileMetadata{{
+		FileID:       "1:100",
+		AbsolutePath: filepath.Clean("/tmp/docs/note.md"),
+		SizeBytes:    2,
+		ModifiedAtNS: 1,
+	}}); err != nil {
+		t.Fatalf("upsert document: %v", err)
+	}
+
+	var documentID int64
+	if err := store.db.QueryRowContext(ctx, "SELECT id FROM documents WHERE file_id = '1:100'").Scan(&documentID); err != nil {
+		t.Fatalf("load document id: %v", err)
+	}
+
+	initial := ChunkReconcilePlan{Insert: []Chunk{
+		{ChunkIndex: 0, Text: "A", TokenCount: 1, StartOffset: 0, EndOffset: 1, ContentHash: "hash-a"},
+		{ChunkIndex: 1, Text: "B", TokenCount: 1, StartOffset: 1, EndOffset: 2, ContentHash: "hash-b"},
+	}}
+	if _, err := store.ApplyDocumentChunkReconcile(ctx, documentID, initial); err != nil {
+		t.Fatalf("initial insert: %v", err)
+	}
+
+	existing, err := store.ChunksByDocumentID(ctx, documentID)
+	if err != nil {
+		t.Fatalf("load chunks: %v", err)
+	}
+
+	incoming := []Chunk{
+		{ChunkIndex: 0, Text: "B", TokenCount: 1, StartOffset: 0, EndOffset: 1, ContentHash: "hash-b"},
+		{ChunkIndex: 1, Text: "A", TokenCount: 1, StartOffset: 1, EndOffset: 2, ContentHash: "hash-a"},
+	}
+	plan := ReconcileChunks(existing, incoming)
+	if len(plan.Keep) != 2 || len(plan.Insert) != 0 || len(plan.RemoveIDs) != 0 {
+		t.Fatalf("expected a pure reorder plan, got %#v", plan)
+	}
+
+	if _, err := store.ApplyDocumentChunkReconcile(ctx, documentID, plan); err != nil {
+		t.Fatalf("swap reconcile: %v", err)
+	}
+
+	final, err := store.ChunksByDocumentID(ctx, documentID)
+	if err != nil {
+		t.Fatalf("load swapped chunks: %v", err)
+	}
+	if len(final) != 2 {
+		t.Fatalf("chunk count mismatch: want 2, got %d", len(final))
+	}
+	if final[0].ContentHash != "hash-b" || final[1].ContentHash != "hash-a" {
+		t.Fatalf("chunk indexes were not swapped: %#v", final)
 	}
 }
 
@@ -261,7 +321,7 @@ func TestDocumentsByStatusAndScanUpdates(t *testing.T) {
 		t.Fatalf("insert document: %v", err)
 	}
 
-	documents, err := store.DocumentsByStatus(ctx, DocumentStatusIndexed, 10)
+	documents, err := store.DocumentsByStatus(ctx, DocumentStatusIndexed, 0, 10)
 	if err != nil {
 		t.Fatalf("documents by status: %v", err)
 	}
@@ -277,7 +337,7 @@ func TestDocumentsByStatusAndScanUpdates(t *testing.T) {
 		t.Fatalf("update content hash and status: %v", err)
 	}
 
-	documents, err = store.DocumentsByStatus(ctx, DocumentStatusScanned, 10)
+	documents, err = store.DocumentsByStatus(ctx, DocumentStatusScanned, 0, 10)
 	if err != nil {
 		t.Fatalf("documents by scanned status: %v", err)
 	}
@@ -289,7 +349,7 @@ func TestDocumentsByStatusAndScanUpdates(t *testing.T) {
 		t.Fatalf("update scan checkpoint and status: %v", err)
 	}
 
-	documents, err = store.DocumentsByStatus(ctx, DocumentStatusEmbedded, 10)
+	documents, err = store.DocumentsByStatus(ctx, DocumentStatusEmbedded, 0, 10)
 	if err != nil {
 		t.Fatalf("documents by embedded status: %v", err)
 	}
@@ -317,7 +377,7 @@ func TestApplyDocumentChunkReconcileKeepsInsertsAndDeletes(t *testing.T) {
 		t.Fatalf("insert document: %v", err)
 	}
 
-	documents, err := store.DocumentsByStatus(ctx, DocumentStatusIndexed, 1)
+	documents, err := store.DocumentsByStatus(ctx, DocumentStatusIndexed, 0, 1)
 	if err != nil {
 		t.Fatalf("documents by status: %v", err)
 	}

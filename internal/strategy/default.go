@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -42,7 +43,7 @@ type FileStrategy struct {
 type Pool []FileStrategy
 
 type Store interface {
-	DocumentsByStatus(ctx context.Context, status string, limit int) ([]storage.Document, error)
+	DocumentsByStatus(ctx context.Context, status string, afterID int64, limit int) ([]storage.Document, error)
 	ApplyDocumentChunkReconcile(ctx context.Context, documentID int64, plan storage.ChunkReconcilePlan) ([]storage.Chunk, error)
 	ChunksByDocumentID(ctx context.Context, documentID int64) ([]storage.Chunk, error)
 	UpdateDocumentStatus(ctx context.Context, fileID string, status string) error
@@ -123,22 +124,35 @@ func (s FileStrategy) Process(ctx context.Context, document storage.Document) ([
 	return s.Chunker.Chunk(ctx, chunker.Input{Document: document, Text: parsedText})
 }
 
-func ProcessScannedDocuments(ctx context.Context, store Store, vectorStore VectorStore, pool Pool) (Result, error) {
+type documentProcessor func(ctx context.Context, document storage.Document) (bool, error)
+
+// processDocumentsByStatus walks every document in a status, one page at a time,
+// ordered by ascending id. With failFast unset, a per-document error is collected and
+// processing continues; the joined errors are returned at the end. Paginating by id
+// means a document that failed (and so kept its status) is not revisited this run.
+func processDocumentsByStatus(ctx context.Context, store Store, status string, failFast bool, process documentProcessor) (Result, error) {
 	var result Result
+	var errs []error
+	var afterID int64
 
 	for {
-		documents, err := store.DocumentsByStatus(ctx, storage.DocumentStatusScanned, strategyBatchSize)
+		documents, err := store.DocumentsByStatus(ctx, status, afterID, strategyBatchSize)
 		if err != nil {
 			return result, err
 		}
 		if len(documents) == 0 {
-			return result, nil
+			return result, errors.Join(errs...)
 		}
 
 		for _, document := range documents {
-			embedded, err := processScannedDocument(ctx, store, vectorStore, pool, document)
-			if err != nil {
+			afterID = document.ID
+			embedded, err := process(ctx, document)
+			if err != nil && failFast {
 				return result, err
+			}
+			if err != nil {
+				errs = append(errs, err)
+				continue
 			}
 
 			if embedded {
@@ -149,30 +163,39 @@ func ProcessScannedDocuments(ctx context.Context, store Store, vectorStore Vecto
 	}
 }
 
-func ProcessChunkedDocuments(ctx context.Context, store Store, vectorStore VectorStore, pool Pool) (Result, error) {
-	var result Result
+func ProcessScannedDocuments(ctx context.Context, store Store, vectorStore VectorStore, pool Pool, failFast bool) (Result, error) {
+	return processDocumentsByStatus(ctx, store, storage.DocumentStatusScanned, failFast, func(ctx context.Context, document storage.Document) (bool, error) {
+		return processScannedDocument(ctx, store, vectorStore, pool, document)
+	})
+}
 
-	for {
-		documents, err := store.DocumentsByStatus(ctx, storage.DocumentStatusChunked, strategyBatchSize)
-		if err != nil {
-			return result, err
-		}
-		if len(documents) == 0 {
-			return result, nil
-		}
+func ProcessChunkedDocuments(ctx context.Context, store Store, vectorStore VectorStore, pool Pool, failFast bool) (Result, error) {
+	return processDocumentsByStatus(ctx, store, storage.DocumentStatusChunked, failFast, func(ctx context.Context, document storage.Document) (bool, error) {
+		return embedChunkedDocument(ctx, store, vectorStore, pool, document)
+	})
+}
 
-		for _, document := range documents {
-			embedded, err := embedChunkedDocument(ctx, store, vectorStore, pool, document)
-			if err != nil {
-				return result, err
-			}
+// RebuildVectors re-embeds the chunks of every embedded document and replaces their
+// vectors, rebuilding the LanceDB index from SQLite (the source of truth). Use it to
+// repair drift between the two stores or to recreate a lost vector database.
+func RebuildVectors(ctx context.Context, store Store, vectorStore VectorStore, pool Pool, failFast bool) (Result, error) {
+	return processDocumentsByStatus(ctx, store, storage.DocumentStatusEmbedded, failFast, func(ctx context.Context, document storage.Document) (bool, error) {
+		return rebuildDocumentVectors(ctx, store, vectorStore, pool, document)
+	})
+}
 
-			if embedded {
-				result.Embedded++
-			}
-			result.Processed++
-		}
+func rebuildDocumentVectors(ctx context.Context, store Store, vectorStore VectorStore, pool Pool, document storage.Document) (bool, error) {
+	fileStrategy, ok := pool.Find(document.AbsolutePath)
+	if !ok {
+		return false, fmt.Errorf("no strategy for document %q", document.AbsolutePath)
 	}
+
+	chunks, err := store.ChunksByDocumentID(ctx, document.ID)
+	if err != nil {
+		return false, fmt.Errorf("load chunks for %q: %w", document.AbsolutePath, err)
+	}
+
+	return embedIfNeeded(ctx, vectorStore, fileStrategy, document, chunks)
 }
 
 func embedChunkedDocument(ctx context.Context, store Store, vectorStore VectorStore, pool Pool, document storage.Document) (bool, error) {
@@ -215,13 +238,16 @@ func processScannedDocument(ctx context.Context, store Store, vectorStore Vector
 	}
 
 	plan := storage.ReconcileChunks(existingChunks, chunks)
-	if err := vectorStore.Delete(ctx, plan.RemoveIDs); err != nil {
-		return false, fmt.Errorf("delete old vectors for %q: %w", document.AbsolutePath, err)
-	}
 
 	insertedChunks, err := store.ApplyDocumentChunkReconcile(ctx, document.ID, plan)
 	if err != nil {
 		return false, fmt.Errorf("reconcile chunks for %q: %w", document.AbsolutePath, err)
+	}
+
+	// SQLite is the source of truth: commit the chunk rows before mutating LanceDB, so
+	// a crash cannot leave chunk rows pointing at vectors that were already deleted.
+	if err := vectorStore.Delete(ctx, plan.RemoveIDs); err != nil {
+		return false, fmt.Errorf("delete old vectors for %q: %w", document.AbsolutePath, err)
 	}
 
 	if err := store.UpdateDocumentStatus(ctx, document.FileID, storage.DocumentStatusChunked); err != nil {

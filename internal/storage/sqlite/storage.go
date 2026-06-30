@@ -280,13 +280,13 @@ ON CONFLICT(file_id) DO UPDATE SET
 	return tx.Commit()
 }
 
-func (s *Store) DocumentsByStatus(ctx context.Context, status string, limit int) ([]Document, error) {
+func (s *Store) DocumentsByStatus(ctx context.Context, status string, afterID int64, limit int) ([]Document, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, file_id, absolute_path, file_size, modified_at_ns, content_hash, scanned_file_size, scanned_modified_at_ns, status, embedded_content_hash
 FROM documents
-WHERE status = ?
+WHERE status = ? AND id > ?
 ORDER BY id
-LIMIT ?`, status, limit)
+LIMIT ?`, status, afterID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -418,6 +418,27 @@ func ReconcileChunks(existing []Chunk, incoming []Chunk) ChunkReconcilePlan {
 	return plan
 }
 
+func moveKeptChunksToTemporaryIndexes(ctx context.Context, tx *sql.Tx, documentID int64, kept []Chunk) error {
+	if len(kept) == 0 {
+		return nil
+	}
+
+	stmt, err := tx.PrepareContext(ctx, "UPDATE chunks SET chunk_index = ? WHERE id = ? AND document_id = ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for i, chunk := range kept {
+		temporaryIndex := -(int64(i) + 1)
+		if _, err := stmt.ExecContext(ctx, temporaryIndex, chunk.ID, documentID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (s *Store) ApplyDocumentChunkReconcile(ctx context.Context, documentID int64, plan ChunkReconcilePlan) ([]Chunk, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -446,6 +467,14 @@ WHERE id = ? AND document_id = ?`)
 		return nil, err
 	}
 	defer updateStmt.Close()
+
+	// Move kept chunks to unique temporary negative indices first. Final indices may
+	// reorder kept chunks (e.g. two identical blocks swap places), and applying them
+	// directly could trip UNIQUE(document_id, chunk_index) mid-transaction when one
+	// row takes an index still held by a not-yet-updated row.
+	if err := moveKeptChunksToTemporaryIndexes(ctx, tx, documentID, plan.Keep); err != nil {
+		return nil, err
+	}
 
 	for _, chunk := range plan.Keep {
 		if _, err := updateStmt.ExecContext(

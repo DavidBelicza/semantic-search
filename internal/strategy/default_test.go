@@ -79,7 +79,7 @@ func TestProcessScannedDocumentsReconcilesChunksEmbedsAndMarksEmbedded(t *testin
 		},
 	}
 
-	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool)
+	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool, false)
 	if err != nil {
 		t.Fatalf("process scanned documents: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestProcessScannedDocumentsKeepsUnchangedChunksAndEmbedsNewChunks(t *testin
 		},
 	}
 
-	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool)
+	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool, false)
 	if err != nil {
 		t.Fatalf("process scanned documents: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestProcessScannedDocumentsEmbedsAllChunksWhenScannedDocumentHasNoChunkChan
 		},
 	}
 
-	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool)
+	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool, false)
 	if err != nil {
 		t.Fatalf("process scanned documents: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestProcessScannedDocumentsSkipsReembeddingWhenAlreadyEmbeddedAndUnchanged(
 		},
 	}
 
-	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool)
+	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool, false)
 	if err != nil {
 		t.Fatalf("process scanned documents: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestProcessChunkedDocumentsEmbedsAndMarksEmbedded(t *testing.T) {
 		},
 	}
 
-	result, err := ProcessChunkedDocuments(context.Background(), store, vectorStore, pool)
+	result, err := ProcessChunkedDocuments(context.Background(), store, vectorStore, pool, false)
 	if err != nil {
 		t.Fatalf("process chunked documents: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestProcessScannedDocumentsLeavesDocumentChunkedWhenEmbeddingFails(t *testi
 		},
 	}
 
-	_, err := ProcessScannedDocuments(context.Background(), store, &memoryVectorStore{}, pool)
+	_, err := ProcessScannedDocuments(context.Background(), store, &memoryVectorStore{}, pool, false)
 	if err == nil {
 		t.Fatal("expected embedding error")
 	}
@@ -329,6 +329,99 @@ func TestProcessScannedDocumentsLeavesDocumentChunkedWhenEmbeddingFails(t *testi
 	}
 	if len(store.chunks[42]) != 1 {
 		t.Fatalf("stored chunk count mismatch: want 1, got %d", len(store.chunks[42]))
+	}
+}
+
+func TestProcessScannedDocumentsContinuesAfterErrorWhenNotFailFast(t *testing.T) {
+	store := &memoryStrategyStore{
+		documents: []storage.Document{
+			{ID: 1, FileID: "1:1", AbsolutePath: "/x/unsupported.txt", Status: storage.DocumentStatusScanned},
+			{ID: 2, FileID: "1:2", AbsolutePath: "/x/note.md", Status: storage.DocumentStatusScanned},
+		},
+		nextChunkID: 100,
+	}
+	vectorStore := &memoryVectorStore{}
+	pool := Pool{
+		{
+			Extensions: []string{".md"},
+			Reader:     fakeReader{text: "abc"},
+			Parser:     fakeParser{},
+			Chunker:    chunker.HardLimitChunker{MaxTokens: 3, AverageTokenLength: 1},
+			Embedder:   fakeEmbedder{},
+		},
+	}
+
+	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool, false)
+	if err == nil {
+		t.Fatal("expected an aggregated error for the unsupported document")
+	}
+	if result.Processed != 1 || result.Embedded != 1 {
+		t.Fatalf("expected the supported document to still process: %#v", result)
+	}
+	if store.documents[1].Status != storage.DocumentStatusEmbedded {
+		t.Fatalf("supported document was not embedded: %q", store.documents[1].Status)
+	}
+}
+
+func TestProcessScannedDocumentsStopsOnFirstErrorWhenFailFast(t *testing.T) {
+	store := &memoryStrategyStore{
+		documents: []storage.Document{
+			{ID: 1, FileID: "1:1", AbsolutePath: "/x/unsupported.txt", Status: storage.DocumentStatusScanned},
+			{ID: 2, FileID: "1:2", AbsolutePath: "/x/note.md", Status: storage.DocumentStatusScanned},
+		},
+		nextChunkID: 100,
+	}
+	pool := Pool{
+		{
+			Extensions: []string{".md"},
+			Reader:     fakeReader{text: "abc"},
+			Parser:     fakeParser{},
+			Chunker:    chunker.HardLimitChunker{MaxTokens: 3, AverageTokenLength: 1},
+			Embedder:   fakeEmbedder{},
+		},
+	}
+
+	result, err := ProcessScannedDocuments(context.Background(), store, &memoryVectorStore{}, pool, true)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if result.Processed != 0 {
+		t.Fatalf("expected abort before the supported document: %#v", result)
+	}
+	if store.documents[1].Status == storage.DocumentStatusEmbedded {
+		t.Fatal("supported document must not be processed in fail-fast mode")
+	}
+}
+
+func TestRebuildVectorsReembedsEmbeddedDocuments(t *testing.T) {
+	store := &memoryStrategyStore{
+		documents: []storage.Document{
+			{ID: 1, FileID: "1:1", AbsolutePath: "/x/a.md", Status: storage.DocumentStatusEmbedded, ContentHash: "h1", EmbeddedContentHash: "h1"},
+		},
+		chunks: map[int64][]storage.Chunk{
+			1: {
+				{ID: 10, DocumentID: 1, ChunkIndex: 0, Text: "abc", ContentHash: "c0"},
+				{ID: 11, DocumentID: 1, ChunkIndex: 1, Text: "def", ContentHash: "c1"},
+			},
+		},
+	}
+	vectorStore := &memoryVectorStore{}
+	pool := Pool{
+		{
+			Extensions: []string{".md"},
+			Embedder:   fakeEmbedder{},
+		},
+	}
+
+	result, err := RebuildVectors(context.Background(), store, vectorStore, pool, false)
+	if err != nil {
+		t.Fatalf("rebuild vectors: %v", err)
+	}
+	if result.Processed != 1 || result.Embedded != 1 {
+		t.Fatalf("result mismatch: %#v", result)
+	}
+	if len(vectorStore.embeddings) != 2 {
+		t.Fatalf("embedding count mismatch: want 2, got %d", len(vectorStore.embeddings))
 	}
 }
 
@@ -368,14 +461,15 @@ type memoryStrategyStore struct {
 	nextChunkID int64
 }
 
-func (s *memoryStrategyStore) DocumentsByStatus(ctx context.Context, status string, limit int) ([]storage.Document, error) {
+func (s *memoryStrategyStore) DocumentsByStatus(ctx context.Context, status string, afterID int64, limit int) ([]storage.Document, error) {
 	var documents []storage.Document
 	for _, document := range s.documents {
-		if document.Status == status {
-			documents = append(documents, document)
-			if len(documents) == limit {
-				return documents, nil
-			}
+		if document.Status != status || document.ID <= afterID {
+			continue
+		}
+		documents = append(documents, document)
+		if len(documents) == limit {
+			return documents, nil
 		}
 	}
 

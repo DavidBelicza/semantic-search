@@ -41,7 +41,7 @@ func TestIndexPathStoresMetadata(t *testing.T) {
 		t.Fatalf("ensure schema: %v", err)
 	}
 
-	if err := IndexPath(context.Background(), store, root, strategy.DefaultPool()); err != nil {
+	if err := IndexPath(context.Background(), store, root, strategy.DefaultPool(), crawler.Options{}); err != nil {
 		t.Fatalf("index path: %v", err)
 	}
 
