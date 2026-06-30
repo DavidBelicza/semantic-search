@@ -96,6 +96,47 @@ func TestScanIndexedDocumentsHashesAndMarksScannedWhenContentChanged(t *testing.
 	}
 }
 
+func TestScanIndexedDocumentsRestoresEmbeddedWhenContentMatchesEmbeddedHash(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "note.md")
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	hash := "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+	store := &memoryScanStore{
+		documents: []storage.Document{
+			{
+				FileID:              "1:100",
+				AbsolutePath:        path,
+				FileSize:            5,
+				ModifiedAtNS:        200,
+				ContentHash:         hash,
+				HasHash:             true,
+				ScannedFileSize:     5,
+				ScannedModifiedAtNS: 100,
+				HasScannedMetadata:  true,
+				EmbeddedContentHash: hash,
+				Status:              storage.DocumentStatusIndexed,
+			},
+		},
+	}
+
+	result, err := ScanIndexedDocuments(context.Background(), store)
+	if err != nil {
+		t.Fatalf("scan indexed documents: %v", err)
+	}
+
+	if result.Scanned != 0 {
+		t.Fatalf("expected no documents scanned into the pipeline, got %#v", result)
+	}
+	if store.documents[0].Status != storage.DocumentStatusEmbedded {
+		t.Fatalf("status mismatch: want embedded, got %q", store.documents[0].Status)
+	}
+	if store.documents[0].ScannedModifiedAtNS != 200 {
+		t.Fatalf("scan checkpoint was not updated: %#v", store.documents[0])
+	}
+}
+
 type memoryScanStore struct {
 	documents []storage.Document
 }

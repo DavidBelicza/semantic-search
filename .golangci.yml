@@ -1,0 +1,35 @@
+# golangci-lint configuration (v2 schema).
+# Primary intent: keep functions flat.
+# See CLAUDE.md → "Code style: prefer a flat structure".
+
+version: "2"
+
+linters:
+  # Default "standard" set (govet, staticcheck, unused, ineffassign) stays on for
+  # bug-catching, plus the nesting/complexity linters below.
+  enable:
+    - nestif   # flags nested if-blocks — enforces "no if inside if"
+    - gocognit # cognitive complexity; nesting (incl. loops) compounds the score
+    - gocyclo  # cyclomatic complexity
+  disable:
+    # Off for now: only flags pre-existing deferred `.Close()` / `tx.Rollback()`
+    # calls in code we are not refactoring. Re-enable when those are cleaned up.
+    - errcheck
+  settings:
+    nestif:
+      # Calibrated: a bare `if` inside an `if` scores complexity 1, while an `if`
+      # inside a loop and sequential guard clauses score 0. So 1 enforces the
+      # strict "no if inside if" rule without flagging if-in-loop.
+      min-complexity: 1
+    gocognit:
+      min-complexity: 20
+    gocyclo:
+      min-complexity: 15
+
+issues:
+  # Grandfather pre-existing findings: only code added or changed after this
+  # baseline commit is checked. Rules apply to new/changed lines, not the legacy
+  # nestif and complexity spots in the original code. Advance this rev once those
+  # are cleaned up if you want full-tree enforcement.
+  new-from-rev: 1e549c6d3ed13e8e17dcf190339fef19921c54ef
+  whole-files: false

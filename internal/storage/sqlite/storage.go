@@ -36,6 +36,7 @@ type Document struct {
 	ScannedModifiedAtNS int64
 	HasScannedMetadata  bool
 	Status              string
+	EmbeddedContentHash string
 }
 
 type Chunk struct {
@@ -85,8 +86,51 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, sqlitemigrations.SchemaSQL); err != nil {
 		return err
 	}
+	if err := s.ensureDocumentStatusSchema(ctx); err != nil {
+		return err
+	}
 
-	return s.ensureDocumentStatusSchema(ctx)
+	return s.ensureEmbeddedContentHashColumn(ctx)
+}
+
+func (s *Store) ensureEmbeddedContentHashColumn(ctx context.Context) error {
+	exists, err := s.documentsColumnExists(ctx, "embedded_content_hash")
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+
+	_, err = s.db.ExecContext(ctx, "ALTER TABLE documents ADD COLUMN embedded_content_hash TEXT")
+	return err
+}
+
+func (s *Store) documentsColumnExists(ctx context.Context, column string) (bool, error) {
+	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(documents)")
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid          int
+			name         string
+			dataType     string
+			notNull      int
+			defaultValue sql.NullString
+			primaryKey   int
+		)
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+
+	return false, rows.Err()
 }
 
 func (s *Store) ensureDocumentStatusSchema(ctx context.Context) error {
@@ -238,7 +282,7 @@ ON CONFLICT(file_id) DO UPDATE SET
 
 func (s *Store) DocumentsByStatus(ctx context.Context, status string, limit int) ([]Document, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, file_id, absolute_path, file_size, modified_at_ns, content_hash, scanned_file_size, scanned_modified_at_ns, status
+SELECT id, file_id, absolute_path, file_size, modified_at_ns, content_hash, scanned_file_size, scanned_modified_at_ns, status, embedded_content_hash
 FROM documents
 WHERE status = ?
 ORDER BY id
@@ -254,6 +298,7 @@ LIMIT ?`, status, limit)
 		var contentHash sql.NullString
 		var scannedFileSize sql.NullInt64
 		var scannedModifiedAtNS sql.NullInt64
+		var embeddedContentHash sql.NullString
 		if err := rows.Scan(
 			&document.ID,
 			&document.FileID,
@@ -264,6 +309,7 @@ LIMIT ?`, status, limit)
 			&scannedFileSize,
 			&scannedModifiedAtNS,
 			&document.Status,
+			&embeddedContentHash,
 		); err != nil {
 			return nil, err
 		}
@@ -273,6 +319,7 @@ LIMIT ?`, status, limit)
 		document.ScannedFileSize = scannedFileSize.Int64
 		document.ScannedModifiedAtNS = scannedModifiedAtNS.Int64
 		document.HasScannedMetadata = scannedFileSize.Valid && scannedModifiedAtNS.Valid
+		document.EmbeddedContentHash = embeddedContentHash.String
 		documents = append(documents, document)
 	}
 	if err := rows.Err(); err != nil {
@@ -305,6 +352,22 @@ SET
 WHERE file_id = ?`
 
 	return s.updateDocument(ctx, query, status, fileID)
+}
+
+// MarkDocumentEmbedded advances a document to the embedded status and records the
+// content hash that has been fully embedded. The recorded hash lets later runs skip
+// re-embedding unchanged documents and tells the pipeline whether kept chunks
+// already have vectors.
+func (s *Store) MarkDocumentEmbedded(ctx context.Context, fileID string, contentHash string) error {
+	query := `
+UPDATE documents
+SET
+	status = 'embedded',
+	embedded_content_hash = ?,
+	updated_at = CURRENT_TIMESTAMP
+WHERE file_id = ?`
+
+	return s.updateDocument(ctx, query, contentHash, fileID)
 }
 
 func (s *Store) UpdateDocumentScanCheckpointAndStatus(ctx context.Context, fileID string, status string) error {

@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestOpenAIEmbedderPostsWithoutBearerToken(t *testing.T) {
@@ -136,5 +138,135 @@ func TestOpenAIEmbedderReportsObjectErrorResponse(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "input too large") {
 		t.Fatalf("error does not include provider message: %v", err)
+	}
+}
+
+func TestEncodeEmbeddingRequestRoundTripsAndKeepsRawHTML(t *testing.T) {
+	inputs := []string{
+		"## Heading\n\n- item one\n- item two\n",
+		"UTF-8: § ' café %C3%A9 — em dash",
+		"URL: https://example.com/a?b=1&c=2<tag>&d=3",
+		"```go\nif a && b {\n\treturn `x`\n}\n```",
+	}
+
+	body, err := encodeEmbeddingRequest(openAIEmbeddingRequest{Model: "m", Input: inputs})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	if !json.Valid(body) {
+		t.Fatalf("encoded body is not valid JSON: %s", body)
+	}
+
+	var decoded openAIEmbeddingRequest
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(decoded.Input) != len(inputs) {
+		t.Fatalf("input count mismatch: want %d, got %d", len(inputs), len(decoded.Input))
+	}
+	for i, want := range inputs {
+		if decoded.Input[i] != want {
+			t.Fatalf("input %d not byte-identical:\nwant %q\n got %q", i, want, decoded.Input[i])
+		}
+	}
+
+	raw := string(body)
+	for _, token := range []string{"&", "<", ">"} {
+		if !strings.Contains(raw, token) {
+			t.Fatalf("expected raw %q in body (SetEscapeHTML(false)), got: %s", token, raw)
+		}
+	}
+	for _, escaped := range []string{"\\u0026", "\\u003c", "\\u003e"} {
+		if strings.Contains(raw, escaped) {
+			t.Fatalf("expected no HTML escape %q in body, got: %s", escaped, raw)
+		}
+	}
+}
+
+func TestOpenAIEmbedderRejectsDimensionMismatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[0.1,0.2,0.3]}]}`))
+	}))
+	defer server.Close()
+
+	embedder := NewOpenAIEmbedder(server.URL, "test-model")
+	embedder.Dimensions = 4
+	_, err := embedder.Embed(context.Background(), []string{"first"})
+	if err == nil {
+		t.Fatal("expected dimension mismatch error")
+	}
+	if !strings.Contains(err.Error(), "dimension mismatch") {
+		t.Fatalf("error does not mention dimension mismatch: %v", err)
+	}
+}
+
+func TestOpenAIEmbedderRetriesTransientStatus(t *testing.T) {
+	var calls int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&calls, 1) < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("temporarily unavailable"))
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[0.1,0.2]}]}`))
+	}))
+	defer server.Close()
+
+	embedder := NewOpenAIEmbedder(server.URL, "test-model")
+	embedder.BackoffBase = time.Millisecond
+	vectors, err := embedder.Embed(context.Background(), []string{"first"})
+	if err != nil {
+		t.Fatalf("embed with retries: %v", err)
+	}
+	if len(vectors) != 1 {
+		t.Fatalf("vector count mismatch: want 1, got %d", len(vectors))
+	}
+	if got := atomic.LoadInt32(&calls); got != 3 {
+		t.Fatalf("expected 3 calls (2 retries), got %d", got)
+	}
+}
+
+func TestOpenAIEmbedderDoesNotRetryClientError(t *testing.T) {
+	var calls int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"bad input"}`))
+	}))
+	defer server.Close()
+
+	embedder := NewOpenAIEmbedder(server.URL, "test-model")
+	embedder.BackoffBase = time.Millisecond
+	_, err := embedder.Embed(context.Background(), []string{"first"})
+	if err == nil {
+		t.Fatal("expected client error")
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("expected no retry on 4xx, got %d calls", got)
+	}
+}
+
+func TestOpenAIEmbedderRetriesExhaustedReturnsError(t *testing.T) {
+	var calls int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("boom"))
+	}))
+	defer server.Close()
+
+	embedder := NewOpenAIEmbedder(server.URL, "test-model")
+	embedder.MaxRetries = 2
+	embedder.BackoffBase = time.Millisecond
+	_, err := embedder.Embed(context.Background(), []string{"first"})
+	if err == nil {
+		t.Fatal("expected error after exhausting retries")
+	}
+	if got := atomic.LoadInt32(&calls); got != 3 {
+		t.Fatalf("expected 3 attempts (1 + 2 retries), got %d", got)
 	}
 }

@@ -5,21 +5,30 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 const (
-	DefaultBaseURL    = "http://127.0.0.1:1234"
-	DefaultModel      = "text-embedding-model"
-	DefaultDimensions = 768
+	DefaultBaseURL        = "http://127.0.0.1:1234"
+	DefaultModel          = "text-embedding-model"
+	DefaultDimensions     = 768
+	DefaultMaxRetries     = 3
+	DefaultRequestTimeout = 60 * time.Second
+	DefaultBackoffBase    = 200 * time.Millisecond
+	DefaultBackoffMax     = 5 * time.Second
 )
 
 type OpenAIEmbedder struct {
-	BaseURL    string
-	Model      string
-	HTTPClient *http.Client
+	BaseURL     string
+	Model       string
+	Dimensions  int
+	MaxRetries  int
+	BackoffBase time.Duration
+	HTTPClient  *http.Client
 }
 
 type openAIEmbeddingRequest struct {
@@ -71,7 +80,8 @@ func NewOpenAIEmbedder(baseURL string, model string) OpenAIEmbedder {
 	return OpenAIEmbedder{
 		BaseURL:    strings.TrimRight(baseURL, "/"),
 		Model:      model,
-		HTTPClient: http.DefaultClient,
+		MaxRetries: DefaultMaxRetries,
+		HTTPClient: &http.Client{Timeout: DefaultRequestTimeout},
 	}
 }
 
@@ -93,39 +103,117 @@ func (e OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32,
 		return nil, err
 	}
 
+	return e.embedWithRetry(ctx, endpoint, body, len(texts))
+}
+
+func (e OpenAIEmbedder) embedWithRetry(ctx context.Context, endpoint string, body []byte, count int) ([][]float32, error) {
+	var lastErr error
+	for attempt := 0; attempt <= e.MaxRetries; attempt++ {
+		vectors, retryable, err := e.embedOnce(ctx, endpoint, body, count)
+		if err == nil {
+			return vectors, nil
+		}
+
+		lastErr = err
+		if !retryable || attempt == e.MaxRetries {
+			return nil, lastErr
+		}
+		if waitErr := sleepBackoff(ctx, e.backoffDelay(attempt)); waitErr != nil {
+			return nil, waitErr
+		}
+	}
+
+	return nil, lastErr
+}
+
+// embedOnce performs a single embedding request. The boolean reports whether the
+// returned error is transient and worth retrying.
+func (e OpenAIEmbedder) embedOnce(ctx context.Context, endpoint string, body []byte, count int) ([][]float32, bool, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	request.Header.Set("Content-Type", "application/json")
 
-	client := e.HTTPClient
-	if client == nil {
-		client = http.DefaultClient
-	}
-
-	response, err := client.Do(request)
+	response, err := e.client().Do(request)
 	if err != nil {
-		return nil, err
+		return nil, true, err
 	}
 	defer response.Body.Close()
 
-	var payload openAIEmbeddingResponse
-	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
-		return nil, fmt.Errorf("decode embedding response: %w", err)
+	data, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, true, err
 	}
 
+	if response.StatusCode/100 != 2 {
+		return nil, isRetryableStatus(response.StatusCode), responseError(response.StatusCode, data)
+	}
+
+	vectors, err := parseEmbeddings(data, count)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := e.validateDimensions(vectors); err != nil {
+		return nil, false, err
+	}
+
+	return vectors, false, nil
+}
+
+func (e OpenAIEmbedder) client() *http.Client {
+	if e.HTTPClient != nil {
+		return e.HTTPClient
+	}
+
+	return &http.Client{Timeout: DefaultRequestTimeout}
+}
+
+func (e OpenAIEmbedder) validateDimensions(vectors [][]float32) error {
+	if e.Dimensions <= 0 {
+		return nil
+	}
+
+	for i, vector := range vectors {
+		if len(vector) != e.Dimensions {
+			return fmt.Errorf("embedding dimension mismatch for input %d: configured %d, got %d", i, e.Dimensions, len(vector))
+		}
+	}
+
+	return nil
+}
+
+func (e OpenAIEmbedder) backoffDelay(attempt int) time.Duration {
+	base := e.BackoffBase
+	if base <= 0 {
+		base = DefaultBackoffBase
+	}
+
+	shift := attempt
+	if shift > 16 {
+		shift = 16
+	}
+
+	delay := base * time.Duration(1<<shift)
+	if delay > DefaultBackoffMax {
+		return DefaultBackoffMax
+	}
+
+	return delay
+}
+
+func parseEmbeddings(data []byte, count int) ([][]float32, error) {
+	var payload openAIEmbeddingResponse
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, fmt.Errorf("decode embedding response: %w", err)
+	}
 	if payload.Error.Message != "" {
 		return nil, fmt.Errorf("embedding request failed: %s", payload.Error.Message)
 	}
 
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("embedding request failed with status %d", response.StatusCode)
-	}
-
-	vectors := make([][]float32, len(texts))
+	vectors := make([][]float32, count)
 	for _, item := range payload.Data {
-		if item.Index < 0 || item.Index >= len(texts) {
+		if item.Index < 0 || item.Index >= count {
 			return nil, fmt.Errorf("embedding response index %d out of range", item.Index)
 		}
 		vectors[item.Index] = item.Embedding
@@ -138,6 +226,55 @@ func (e OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32,
 	}
 
 	return vectors, nil
+}
+
+func sleepBackoff(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func isRetryableStatus(code int) bool {
+	if code == http.StatusTooManyRequests {
+		return true
+	}
+
+	return code >= 500 && code <= 599
+}
+
+func responseError(code int, body []byte) error {
+	message := providerErrorMessage(body)
+	if message == "" {
+		message = strings.TrimSpace(string(body))
+	}
+	if message == "" {
+		return fmt.Errorf("embedding request failed with status %d", code)
+	}
+
+	return fmt.Errorf("embedding request failed with status %d: %s", code, truncate(message, 512))
+}
+
+func providerErrorMessage(body []byte) string {
+	var payload openAIEmbeddingResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+
+	return payload.Error.Message
+}
+
+func truncate(text string, max int) string {
+	if len(text) <= max {
+		return text
+	}
+
+	return text[:max]
 }
 
 func encodeEmbeddingRequest(request openAIEmbeddingRequest) ([]byte, error) {

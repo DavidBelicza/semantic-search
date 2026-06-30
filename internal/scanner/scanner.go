@@ -49,14 +49,8 @@ func ScanIndexedDocuments(ctx context.Context, store Store) (Result, error) {
 }
 
 func scanDocument(ctx context.Context, store Store, document storage.Document) (string, error) {
-	if document.HasHash && document.HasScannedMetadata &&
-		document.FileSize == document.ScannedFileSize &&
-		document.ModifiedAtNS == document.ScannedModifiedAtNS {
-		if err := store.UpdateDocumentScanCheckpointAndStatus(ctx, document.FileID, storage.DocumentStatusScanned); err != nil {
-			return "", fmt.Errorf("mark unchanged document scanned %q: %w", document.AbsolutePath, err)
-		}
-
-		return storage.DocumentStatusScanned, nil
+	if metadataMatchesCheckpoint(document) {
+		return markCheckpoint(ctx, store, document, storage.DocumentStatusScanned)
 	}
 
 	contentHash, err := HashFile(document.AbsolutePath)
@@ -64,12 +58,15 @@ func scanDocument(ctx context.Context, store Store, document storage.Document) (
 		return "", fmt.Errorf("hash file %q: %w", document.AbsolutePath, err)
 	}
 
-	if document.HasHash && document.ContentHash == contentHash {
-		if err := store.UpdateDocumentScanCheckpointAndStatus(ctx, document.FileID, storage.DocumentStatusScanned); err != nil {
-			return "", fmt.Errorf("mark same-hash document scanned %q: %w", document.AbsolutePath, err)
-		}
+	// Content is byte-identical to what has already been embedded (e.g. the file was
+	// only touched). Restore the embedded status and skip re-chunking and
+	// re-embedding entirely; the file was read once here just to hash it.
+	if document.EmbeddedContentHash != "" && document.EmbeddedContentHash == contentHash {
+		return markCheckpoint(ctx, store, document, storage.DocumentStatusEmbedded)
+	}
 
-		return storage.DocumentStatusScanned, nil
+	if document.HasHash && document.ContentHash == contentHash {
+		return markCheckpoint(ctx, store, document, storage.DocumentStatusScanned)
 	}
 
 	if err := store.UpdateDocumentContentHashAndStatus(ctx, document.FileID, contentHash, storage.DocumentStatusScanned); err != nil {
@@ -77,6 +74,20 @@ func scanDocument(ctx context.Context, store Store, document storage.Document) (
 	}
 
 	return storage.DocumentStatusScanned, nil
+}
+
+func metadataMatchesCheckpoint(document storage.Document) bool {
+	return document.HasHash && document.HasScannedMetadata &&
+		document.FileSize == document.ScannedFileSize &&
+		document.ModifiedAtNS == document.ScannedModifiedAtNS
+}
+
+func markCheckpoint(ctx context.Context, store Store, document storage.Document, status string) (string, error) {
+	if err := store.UpdateDocumentScanCheckpointAndStatus(ctx, document.FileID, status); err != nil {
+		return "", fmt.Errorf("mark document %q as %s: %w", document.AbsolutePath, status, err)
+	}
+
+	return status, nil
 }
 
 func HashFile(path string) (string, error) {

@@ -91,6 +91,64 @@ VALUES ('1:100', '/tmp/docs/README.md', 10, 100, 'hash', 10, 100, 'done')`); err
 	}
 }
 
+func TestEnsureSchemaAddsEmbeddedContentHashColumnToLegacyDatabase(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	if _, err := store.db.ExecContext(ctx, `
+CREATE TABLE documents (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	file_id TEXT NOT NULL,
+	absolute_path TEXT NOT NULL,
+	file_size INTEGER NOT NULL,
+	modified_at_ns INTEGER NOT NULL,
+	content_hash TEXT,
+	scanned_file_size INTEGER,
+	scanned_modified_at_ns INTEGER,
+	status TEXT NOT NULL DEFAULT 'indexed' CHECK(status IN ('indexed', 'scanned', 'chunked', 'embedded')),
+	indexed_at_unix INTEGER,
+	deleted_at_unix INTEGER,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	UNIQUE(file_id)
+)`); err != nil {
+		t.Fatalf("create legacy documents table: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `
+INSERT INTO documents (file_id, absolute_path, file_size, modified_at_ns, content_hash, scanned_file_size, scanned_modified_at_ns, status)
+VALUES ('1:100', '/tmp/docs/README.md', 10, 100, 'hash', 10, 100, 'scanned')`); err != nil {
+		t.Fatalf("insert legacy document: %v", err)
+	}
+
+	if err := store.EnsureSchema(ctx); err != nil {
+		t.Fatalf("ensure schema: %v", err)
+	}
+
+	exists, err := store.documentsColumnExists(ctx, "embedded_content_hash")
+	if err != nil {
+		t.Fatalf("check column: %v", err)
+	}
+	if !exists {
+		t.Fatal("expected embedded_content_hash column to be added to legacy database")
+	}
+
+	if err := store.MarkDocumentEmbedded(ctx, "1:100", "content-hash"); err != nil {
+		t.Fatalf("mark embedded: %v", err)
+	}
+
+	documents, err := store.DocumentsByStatus(ctx, DocumentStatusEmbedded, 10)
+	if err != nil {
+		t.Fatalf("documents by status: %v", err)
+	}
+	if len(documents) != 1 {
+		t.Fatalf("document count mismatch: want 1, got %d", len(documents))
+	}
+	if documents[0].EmbeddedContentHash != "content-hash" {
+		t.Fatalf("embedded content hash mismatch: got %q", documents[0].EmbeddedContentHash)
+	}
+}
+
 func TestUpsertDocumentsInsertsAndUpdatesInBatch(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)

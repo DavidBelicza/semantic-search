@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS documents (
 	scanned_file_size INTEGER,
 	scanned_modified_at_ns INTEGER,
 	status TEXT NOT NULL DEFAULT 'indexed' CHECK(status IN ('indexed', 'scanned', 'chunked', 'embedded')),
+	embedded_content_hash TEXT,
 	indexed_at_unix INTEGER,
 	deleted_at_unix INTEGER,
 	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

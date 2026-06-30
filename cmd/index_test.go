@@ -143,6 +143,10 @@ func (s *fakeDocumentStore) UpdateDocumentStatus(ctx context.Context, fileID str
 	return nil
 }
 
+func (s *fakeDocumentStore) MarkDocumentEmbedded(ctx context.Context, fileID string, contentHash string) error {
+	return nil
+}
+
 func (s *fakeDocumentStore) ApplyDocumentChunkReconcile(ctx context.Context, documentID int64, plan storage.ChunkReconcilePlan) ([]storage.Chunk, error) {
 	return plan.Insert, nil
 }

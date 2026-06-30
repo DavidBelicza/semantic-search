@@ -46,6 +46,7 @@ type Store interface {
 	ApplyDocumentChunkReconcile(ctx context.Context, documentID int64, plan storage.ChunkReconcilePlan) ([]storage.Chunk, error)
 	ChunksByDocumentID(ctx context.Context, documentID int64) ([]storage.Chunk, error)
 	UpdateDocumentStatus(ctx context.Context, fileID string, status string) error
+	MarkDocumentEmbedded(ctx context.Context, fileID string, contentHash string) error
 }
 
 type VectorStore interface {
@@ -60,6 +61,7 @@ type Result struct {
 
 func DefaultPool() Pool {
 	openAIEmbedder := embedder.NewOpenAIEmbedder(embedder.DefaultBaseURL, embedder.DefaultModel)
+	openAIEmbedder.Dimensions = embedder.DefaultDimensions
 	return Pool{
 		{
 			Extensions: []string{".md", ".markdown", ".mdown"},
@@ -160,32 +162,40 @@ func ProcessChunkedDocuments(ctx context.Context, store Store, vectorStore Vecto
 		}
 
 		for _, document := range documents {
-			fileStrategy, ok := pool.Find(document.AbsolutePath)
-			if !ok {
-				return result, fmt.Errorf("no strategy for document %q", document.AbsolutePath)
-			}
-			if fileStrategy.Embedder == nil {
-				return result, fmt.Errorf("embedder is required for document %q", document.AbsolutePath)
-			}
-
-			chunks, err := store.ChunksByDocumentID(ctx, document.ID)
+			embedded, err := embedChunkedDocument(ctx, store, vectorStore, pool, document)
 			if err != nil {
-				return result, fmt.Errorf("load chunks for %q: %w", document.AbsolutePath, err)
+				return result, err
 			}
 
-			if len(chunks) > 0 {
-				if err := embedChunks(ctx, vectorStore, fileStrategy.Embedder, document, chunks); err != nil {
-					return result, err
-				}
+			if embedded {
 				result.Embedded++
-			}
-
-			if err := store.UpdateDocumentStatus(ctx, document.FileID, storage.DocumentStatusEmbedded); err != nil {
-				return result, fmt.Errorf("mark document embedded %q: %w", document.AbsolutePath, err)
 			}
 			result.Processed++
 		}
 	}
+}
+
+func embedChunkedDocument(ctx context.Context, store Store, vectorStore VectorStore, pool Pool, document storage.Document) (bool, error) {
+	fileStrategy, ok := pool.Find(document.AbsolutePath)
+	if !ok {
+		return false, fmt.Errorf("no strategy for document %q", document.AbsolutePath)
+	}
+
+	chunks, err := store.ChunksByDocumentID(ctx, document.ID)
+	if err != nil {
+		return false, fmt.Errorf("load chunks for %q: %w", document.AbsolutePath, err)
+	}
+
+	embedded, err := embedIfNeeded(ctx, vectorStore, fileStrategy, document, chunks)
+	if err != nil {
+		return false, err
+	}
+
+	if err := store.MarkDocumentEmbedded(ctx, document.FileID, document.ContentHash); err != nil {
+		return false, fmt.Errorf("mark document embedded %q: %w", document.AbsolutePath, err)
+	}
+
+	return embedded, nil
 }
 
 func processScannedDocument(ctx context.Context, store Store, vectorStore VectorStore, pool Pool, document storage.Document) (bool, error) {
@@ -218,30 +228,57 @@ func processScannedDocument(ctx context.Context, store Store, vectorStore Vector
 		return false, fmt.Errorf("mark document chunked %q: %w", document.AbsolutePath, err)
 	}
 
-	chunksToEmbed := insertedChunks
-	if len(plan.Insert) == 0 && len(plan.RemoveIDs) == 0 && len(existingChunks) > 0 {
-		chunksToEmbed, err = store.ChunksByDocumentID(ctx, document.ID)
-		if err != nil {
-			return false, fmt.Errorf("load retry chunks for %q: %w", document.AbsolutePath, err)
-		}
+	chunksToEmbed, err := chunksForEmbedding(ctx, store, document, insertedChunks, existingChunks)
+	if err != nil {
+		return false, err
 	}
 
-	embedded := false
-	if len(chunksToEmbed) > 0 {
-		if fileStrategy.Embedder == nil {
-			return false, fmt.Errorf("embedder is required for document %q", document.AbsolutePath)
-		}
-		if err := embedChunks(ctx, vectorStore, fileStrategy.Embedder, document, chunksToEmbed); err != nil {
-			return false, err
-		}
-		embedded = true
+	embedded, err := embedIfNeeded(ctx, vectorStore, fileStrategy, document, chunksToEmbed)
+	if err != nil {
+		return false, err
 	}
 
-	if err := store.UpdateDocumentStatus(ctx, document.FileID, storage.DocumentStatusEmbedded); err != nil {
+	if err := store.MarkDocumentEmbedded(ctx, document.FileID, document.ContentHash); err != nil {
 		return false, fmt.Errorf("mark document embedded %q: %w", document.AbsolutePath, err)
 	}
 
 	return embedded, nil
+}
+
+// chunksForEmbedding selects which chunks still need vectors. A document that was
+// already embedded keeps valid vectors for its unchanged (kept) chunks, so only the
+// newly inserted chunks need embedding — this avoids re-embedding an entire document
+// when only its file metadata changed. A document that has never been embedded must
+// embed all of its current chunks, even when reconciliation kept them, because no
+// vectors exist for them yet.
+func chunksForEmbedding(ctx context.Context, store Store, document storage.Document, inserted []storage.Chunk, existing []storage.Chunk) ([]storage.Chunk, error) {
+	if document.EmbeddedContentHash != "" {
+		return inserted, nil
+	}
+	if len(existing) == 0 {
+		return inserted, nil
+	}
+
+	chunks, err := store.ChunksByDocumentID(ctx, document.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load chunks for %q: %w", document.AbsolutePath, err)
+	}
+
+	return chunks, nil
+}
+
+func embedIfNeeded(ctx context.Context, vectorStore VectorStore, fileStrategy FileStrategy, document storage.Document, chunks []storage.Chunk) (bool, error) {
+	if len(chunks) == 0 {
+		return false, nil
+	}
+	if fileStrategy.Embedder == nil {
+		return false, fmt.Errorf("embedder is required for document %q", document.AbsolutePath)
+	}
+	if err := embedChunks(ctx, vectorStore, fileStrategy.Embedder, document, chunks); err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 func embedChunks(ctx context.Context, vectorStore VectorStore, embedder Embedder, document storage.Document, chunks []storage.Chunk) error {
