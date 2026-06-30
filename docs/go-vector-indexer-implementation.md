@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-Implement a local Go CLI application that recursively scans a directory, reads Markdown files, splits each document into chunks, sends each chunk to a remote embedding endpoint exposed by LM Studio, and stores the resulting vectors in a local SQLite database using the Vectorlite extension.
+Implement a local Go CLI application that recursively scans a directory, reads Markdown files, splits each document into chunks, sends each chunk to a remote embedding endpoint exposed by LM Studio, stores document and chunk metadata in SQLite, and stores vectors in LanceDB.
 
 The CLI has two primary operations:
 
@@ -27,7 +27,7 @@ Every Go source file must have a corresponding unit test.
 - Configurable chunk overlap
 - Remote embedding calls through LM Studio
 - SQLite persistence
-- Vectorlite-based vector search
+- LanceDB-based vector search
 - Incremental reindexing
 - Deleted-file cleanup
 - Search grouped by document
@@ -63,13 +63,13 @@ Every Go source file must have a corresponding unit test.
           recursive Markdown crawl          embed search query
                     │                                │
                     v                                v
-          deterministic chunking             Vectorlite ANN search
+          deterministic chunking             LanceDB vector search
                     │                                │
                     v                                v
           LM Studio embedding API       group candidates by document
                     │                                │
                     v                                v
-       SQLite + Vectorlite persistence      return ranked documents
+       SQLite and LanceDB persistence      return ranked documents
 ```
 
 Recommended internal modules:
@@ -131,7 +131,6 @@ Recommended flags:
 
 ```text
 --db                 SQLite database path
---vector             Path to the Vectorlite native extension
 --embedding-url      LM Studio embeddings endpoint
 --embedding-model    Model identifier sent to LM Studio
 --max-tokens         Maximum tokens per chunk
@@ -167,7 +166,6 @@ Recommended flags:
 
 ```text
 --db                   SQLite database path
---vector               Path to the Vectorlite native extension
 --embedding-url        LM Studio embeddings endpoint
 --embedding-model      Model identifier
 --limit                 Number of documents to return
@@ -222,39 +220,29 @@ chunks per document:  3
 
 ---
 
-## 6. SQLite and Vectorlite Integration
+## 6. SQLite and LanceDB Integration
 
-Use:
+Use SQLite for documents and chunks:
 
 ```text
 github.com/mattn/go-sqlite3
 ```
 
-The application must load Vectorlite as a SQLite extension.
+Use LanceDB for chunk vectors:
 
-Conceptual initialization:
-
-```go
-sql.Register("sqlite3_vectorlite", &sqlite3.SQLiteDriver{
-    Extensions: []string{
-        vectorPath,
-    },
-})
-
-db, err := sql.Open("sqlite3_vectorlite", databasePath)
+```text
+github.com/lancedb/lancedb-go
 ```
 
 Requirements:
 
 - CGO must be enabled.
-- The Vectorlite extension must match the current OS and architecture.
-- The extension path must be configurable.
-- Database initialization must verify that Vectorlite loaded successfully.
-- Startup must fail with a clear error when the extension is missing or incompatible.
+- The LanceDB native dependency must match the current OS and architecture.
+- The LanceDB database path is derived from the configured SQLite database path.
+- Database initialization must verify that SQLite and LanceDB both open successfully.
+- Startup must fail with a clear error when the LanceDB native dependency is missing or incompatible.
 
-Run a small health query after opening the database.
-
-The exact Vectorlite health function and virtual-table syntax must be confirmed against the bundled Vectorlite version. Keep all Vectorlite-specific SQL isolated inside the `vectorstore` package so that syntax changes do not affect the rest of the application.
+Keep all LanceDB-specific schema and SDK calls isolated inside the `vectorstore` package so that backend details do not affect command handlers or the indexing pipeline.
 
 ---
 
@@ -262,7 +250,7 @@ The exact Vectorlite health function and virtual-table syntax must be confirmed 
 
 Use regular SQLite tables for documents, chunks, indexing metadata, and configuration.
 
-Use a Vectorlite virtual table for the chunk vectors.
+Use a LanceDB vector table for the chunk vectors.
 
 ### 7.1 Documents
 
@@ -323,31 +311,29 @@ chunk_overlap_tokens
 
 ### 7.4 Vector table
 
-Create one Vectorlite row per chunk. Do not store vectors in a normal SQLite table.
+Create one LanceDB row per chunk. Do not store vectors in a normal SQLite table, and do not duplicate chunk text or document metadata that already lives in SQLite.
 
 Conceptually:
 
-```sql
-CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vectors
-USING vectorlite(
-    embedding float32[EMBEDDING_DIMENSIONS],
-    hnsw(max_elements=EXPECTED_MAX_CHUNKS)
-);
+```text
+chunk_vectors
+  chunk_id int64
+  vector   fixed_size_list<float32>[EMBEDDING_DIMENSIONS]
 ```
 
-The row identifier must map directly to `chunks.id`.
+`chunk_id` must map directly to `chunks.id`.
 
-The exact insert and search syntax depends on the installed Vectorlite version. Encapsulate it behind a Go interface:
+The exact insert and search calls depend on the installed LanceDB Go SDK version. Encapsulate them behind a Go interface:
 
 ```go
 type VectorStore interface {
-    Insert(ctx context.Context, chunkID int64, vector []float32) error
     Delete(ctx context.Context, chunkIDs []int64) error
+    Replace(ctx context.Context, embeddings []ChunkEmbedding) error
     Search(ctx context.Context, query []float32, limit int) ([]VectorHit, error)
 }
 ```
 
-Do not spread raw Vectorlite SQL across command handlers.
+Do not spread raw LanceDB SDK calls across command handlers.
 
 ---
 
@@ -621,7 +607,7 @@ type Embedder interface {
 
 ### 11.4 Validation
 
-- Create the Vectorlite table at application startup using the configured embedding dimensions.
+- Create the LanceDB table at application startup using the configured embedding dimensions.
 - Ensure every returned embedding vector matches the configured dimensions.
 - Refuse vectors with incompatible dimensions.
 
@@ -657,7 +643,7 @@ Do not retry indefinitely.
 
 ```text
 open database
-load Vectorlite
+load LanceDB
 validate schema
 scan root directory
 discover Markdown files
@@ -688,7 +674,7 @@ When a document changes:
 8. Commit.
 9. Roll back on failure.
 
-Because Vectorlite virtual-table operations may have transaction-specific behavior, verify atomicity with the selected Vectorlite version.
+Because SQLite and LanceDB are separate stores, treat SQLite as the source of truth and LanceDB as a rebuildable derived vector index.
 
 Document processing is staged with an explicit status:
 
@@ -748,7 +734,7 @@ read query
 normalize query
 embed query using LM Studio
 validate vector dimensions
-search Vectorlite for top candidate chunks
+search LanceDB for top candidate chunks
 join chunk hits to documents
 group results by document ID
 score documents
@@ -782,7 +768,7 @@ For the initial implementation:
 document score = best chunk score
 ```
 
-When Vectorlite returns distance where lower is better:
+When LanceDB returns distance where lower is better:
 
 ```text
 document score is based on minimum chunk distance
@@ -837,7 +823,7 @@ This should be a separate option because adjacent chunks are not necessarily amo
 
 ## 14. Search SQL Shape
 
-Vectorlite-specific search SQL must remain encapsulated.
+LanceDB-specific search SQL must remain encapsulated.
 
 The application-level result should look like:
 
@@ -864,11 +850,11 @@ JOIN documents d ON d.id = c.document_id
 WHERE c.id IN (...);
 ```
 
-Group in Go rather than relying on complex SQL around the virtual table.
+Group in Go after retrieving candidate chunk IDs from LanceDB.
 
 Benefits:
 
-- Simpler Vectorlite integration
+- Simpler LanceDB integration
 - Easier score logic
 - Easier multi-chunk result construction
 - Easier testing
@@ -1056,9 +1042,8 @@ Do not log full document text or full embedding vectors by default.
 - Do not interpret Markdown code blocks.
 - Avoid following symlinks by default.
 - Prevent directory traversal when resolving relative paths.
-- Store database and extension paths explicitly.
-- Never dynamically load arbitrary extensions discovered in indexed directories.
-- Load only the configured Vectorlite extension.
+- Store database paths explicitly.
+- Load only the configured LanceDB native dependency.
 
 ---
 
@@ -1113,7 +1098,7 @@ Use:
 - Temporary directories
 - Temporary SQLite databases
 - A fake HTTP embedding server
-- A real Vectorlite extension in platform-specific CI where possible
+- A real LanceDB native dependency in platform-specific CI where possible
 
 Integration scenarios:
 
@@ -1269,13 +1254,13 @@ A vector dimension change requires creating a new vector table or performing a f
 - SQLite schema
 - LM Studio embedding client
 - Simple paragraph-based chunking
-- Vectorlite inserts
+- LanceDB inserts
 - Full initial index
 
 ### Phase 2: Search
 
 - Query embedding
-- Vectorlite candidate search
+- LanceDB candidate search
 - Chunk metadata loading
 - Grouping by document ID
 - Human-readable and JSON output
@@ -1301,7 +1286,7 @@ A vector dimension change requires creating a new vector table or performing a f
 - Retries
 - Structured logging
 - Migration support
-- Cross-platform extension loading
+- Cross-platform LanceDB native dependency loading
 - Integration tests
 - Performance benchmarks
 
@@ -1316,7 +1301,7 @@ The implementation is complete when all of the following are true:
 3. Adjacent chunks use the configured overlap policy.
 4. Chunks are embedded through LM Studio's embeddings endpoint.
 5. Documents and chunks are stored in SQLite.
-6. Chunk vectors are stored and searched through Vectorlite.
+6. Chunk vectors are stored and searched through LanceDB.
 7. Re-running index skips unchanged files.
 8. Changed files replace their previous chunks and vectors.
 9. Missing files can be removed from the index.
@@ -1329,7 +1314,7 @@ The implementation is complete when all of the following are true:
 16. Model or vector-dimension mismatches produce explicit errors.
 17. Indexing failures do not leave searchable partial documents.
 18. Unit tests do not require a running LM Studio instance.
-19. Vectorlite-specific SQL is isolated behind a storage abstraction.
+19. LanceDB-specific SDK calls are isolated behind a storage abstraction.
 20. The application runs as a local CLI without a database server.
 
 ---
@@ -1348,7 +1333,7 @@ chunks per document:    3
 document score:         best chunk score
 distance metric:        cosine
 database engine:        SQLite
-vector extension:       Vectorlite
+vector database:        LanceDB
 embedding provider:     LM Studio
 ```
 
@@ -1356,10 +1341,10 @@ embedding provider:     LM Studio
 
 ## 28. Important Implementation Notes for Codex
 
-- Verify the exact Vectorlite SQL syntax against the version included in the project before writing migrations.
-- Do not assume that generic SQLite vector-extension syntax is valid for Vectorlite.
-- Keep Vectorlite queries isolated in one package.
-- Do not substitute `sqlite-vec` or another vector extension unless explicitly requested.
+- Verify the exact LanceDB Go SDK behavior against the version included in the project before writing migrations.
+- Do not model LanceDB as a SQLite extension.
+- Keep LanceDB queries isolated in one package.
+- Do not substitute `sqlite-vec` or another vector backend unless explicitly requested.
 - Do not implement a server.
 - Do not use an LLM for chunking.
 - Do not return duplicate documents in final search results.

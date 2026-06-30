@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"semantic-search/cmd"
@@ -26,12 +27,8 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	vectorPath, err := vectorPathFromArgs(args)
-	if err != nil {
-		return err
-	}
 
-	store, err := storage.OpenWithExtensions(databasePath, extensionPaths(vectorPath))
+	store, err := storage.Open(databasePath)
 	if err != nil {
 		return err
 	}
@@ -41,12 +38,11 @@ func run(args []string, stdout io.Writer, stderr io.Writer) error {
 		return err
 	}
 
-	vectorStore := vectorstore.New(store.DB(), embedder.DefaultDimensions)
-	if vectorPath != "" {
-		if err := vectorStore.EnsureSchema(context.Background()); err != nil {
-			return err
-		}
+	vectorStore, err := vectorstore.Open(context.Background(), vectorDatabasePath(databasePath), embedder.DefaultDimensions)
+	if err != nil {
+		return err
 	}
+	defer vectorStore.Close()
 
 	rootCmd := cmd.NewRootCommand(stdout, store, vectorStore)
 	rootCmd.SetErr(stderr)
@@ -78,43 +74,11 @@ func databasePathFromArgs(args []string) (string, error) {
 	return cmd.DefaultDatabasePath, nil
 }
 
-func vectorPathFromArgs(args []string) (string, error) {
-	for i, arg := range args {
-		if arg == "--vector" {
-			if i+1 >= len(args) {
-				return "", errors.New("missing value for --vector")
-			}
-
-			return args[i+1], nil
-		}
-
-		if strings.HasPrefix(arg, "--vector=") {
-			vectorPath := strings.TrimPrefix(arg, "--vector=")
-			if vectorPath == "" {
-				return "", errors.New("missing value for --vector")
-			}
-
-			return vectorPath, nil
-		}
+func vectorDatabasePath(databasePath string) string {
+	extension := filepath.Ext(databasePath)
+	if extension == "" {
+		return databasePath + ".lancedb"
 	}
 
-	return cmd.DefaultVectorPath, nil
-}
-
-func extensionPaths(vectorPath string) []string {
-	if vectorPath == "" {
-		return nil
-	}
-
-	return []string{normalizeExtensionPath(vectorPath)}
-}
-
-func normalizeExtensionPath(path string) string {
-	for _, suffix := range []string{".dylib", ".so", ".dll"} {
-		if strings.HasSuffix(path, suffix) {
-			return strings.TrimSuffix(path, suffix)
-		}
-	}
-
-	return path
+	return strings.TrimSuffix(databasePath, extension) + ".lancedb"
 }

@@ -63,75 +63,34 @@ func TestDatabasePathFromArgs(t *testing.T) {
 	}
 }
 
-func TestVectorPathFromArgs(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{
-			name: "default",
-			args: []string{"index", "."},
-			want: cmd.DefaultVectorPath,
-		},
-		{
-			name: "separate value",
-			args: []string{"--vector", "/tmp/vectorlite.dylib", "index", "."},
-			want: "/tmp/vectorlite.dylib",
-		},
-		{
-			name: "equals value",
-			args: []string{"index", "--vector=/tmp/vectorlite.dylib", "."},
-			want: "/tmp/vectorlite.dylib",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := vectorPathFromArgs(tt.args)
-			if err != nil {
-				t.Fatalf("vector path from args: %v", err)
-			}
-			if got != tt.want {
-				t.Fatalf("vector path mismatch: want %q, got %q", tt.want, got)
-			}
-		})
-	}
-}
-
-func TestNormalizeExtensionPath(t *testing.T) {
+func TestVectorDatabasePath(t *testing.T) {
 	tests := []struct {
 		name string
 		path string
 		want string
 	}{
 		{
-			name: "mac dylib",
-			path: "./vector-db.dylib",
-			want: "./vector-db",
+			name: "sqlite extension",
+			path: "index.db",
+			want: "index.lancedb",
 		},
 		{
-			name: "linux shared object",
-			path: "./vector-db.so",
-			want: "./vector-db",
+			name: "path with directory",
+			path: filepath.Join("data", "index.sqlite"),
+			want: filepath.Join("data", "index.lancedb"),
 		},
 		{
-			name: "windows dll",
-			path: "./vector-db.dll",
-			want: "./vector-db",
-		},
-		{
-			name: "already normalized",
-			path: "./vector-db",
-			want: "./vector-db",
+			name: "no extension",
+			path: "index",
+			want: "index.lancedb",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := normalizeExtensionPath(tt.path)
+			got := vectorDatabasePath(tt.path)
 			if got != tt.want {
-				t.Fatalf("normalized path mismatch: want %q, got %q", tt.want, got)
+				t.Fatalf("vector database path mismatch: want %q, got %q", tt.want, got)
 			}
 		})
 	}

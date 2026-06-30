@@ -2,15 +2,12 @@ package storage
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	_ "embed"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
 
-	sqlite3 "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3"
 
 	"semantic-search/internal/crawler"
 )
@@ -74,49 +71,12 @@ func Open(path string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-func OpenWithExtensions(path string, extensions []string) (*Store, error) {
-	if len(extensions) == 0 {
-		return Open(path)
-	}
-
-	driverName := driverNameForExtensions(extensions)
-	if !driverRegistered(driverName) {
-		sql.Register(driverName, &sqlite3.SQLiteDriver{Extensions: extensions})
-	}
-
-	db, err := sql.Open(driverName, path)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		db.Close()
-		return nil, err
-	}
-
-	return &Store{db: db}, nil
-}
-
 func (s *Store) Close() error {
 	return s.db.Close()
 }
 
 func (s *Store) DB() *sql.DB {
 	return s.db
-}
-
-func driverNameForExtensions(extensions []string) string {
-	hash := sha256.Sum256([]byte(strings.Join(extensions, "\x00")))
-	return "sqlite3_ext_" + hex.EncodeToString(hash[:8])
-}
-
-func driverRegistered(name string) bool {
-	for _, driver := range sql.Drivers() {
-		if driver == name {
-			return true
-		}
-	}
-
-	return false
 }
 
 func (s *Store) EnsureSchema(ctx context.Context) error {
