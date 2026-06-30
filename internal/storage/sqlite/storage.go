@@ -539,6 +539,50 @@ INSERT INTO chunks (
 	return inserted, nil
 }
 
+type ChunkMetadata struct {
+	ChunkID    int64
+	DocumentID int64
+	Text       string
+}
+
+func (s *Store) ChunkMetadataByIDs(ctx context.Context, chunkIDs []int64) ([]ChunkMetadata, error) {
+	if len(chunkIDs) == 0 {
+		return nil, nil
+	}
+
+	query, args := chunkMetadataQuery(chunkIDs)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var metadata []ChunkMetadata
+	for rows.Next() {
+		var item ChunkMetadata
+		if err := rows.Scan(&item.ChunkID, &item.DocumentID, &item.Text); err != nil {
+			return nil, err
+		}
+		metadata = append(metadata, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return metadata, nil
+}
+
+func chunkMetadataQuery(chunkIDs []int64) (string, []any) {
+	placeholders := make([]string, len(chunkIDs))
+	args := make([]any, len(chunkIDs))
+	for i, chunkID := range chunkIDs {
+		placeholders[i] = "?"
+		args[i] = chunkID
+	}
+
+	return "SELECT id, document_id, text FROM chunks WHERE id IN (" + strings.Join(placeholders, ", ") + ")", args
+}
+
 func (s *Store) ChunksByDocumentID(ctx context.Context, documentID int64) ([]Chunk, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, document_id, chunk_index, text, token_count, start_offset, end_offset, content_hash

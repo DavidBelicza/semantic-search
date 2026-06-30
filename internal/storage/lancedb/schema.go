@@ -10,6 +10,7 @@ const (
 	chunkVectorsTable = "chunk_vectors"
 	chunkIDColumn     = "chunk_id"
 	vectorColumn      = "vector"
+	distanceColumn    = "_distance"
 )
 
 func chunkVectorSchema(dimensions int) *arrow.Schema {

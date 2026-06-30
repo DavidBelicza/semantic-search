@@ -28,7 +28,7 @@ func NewRootCommand(out io.Writer, store semanticsearch.AppStore, vectorStore se
 	rootCmd.AddCommand(NewIndexCommand(out, store, vectorStore))
 	rootCmd.AddCommand(NewScanCommand(out, store))
 	rootCmd.AddCommand(NewRebuildCommand(out, store, vectorStore))
-	rootCmd.AddCommand(NewSearchCommand(out))
+	rootCmd.AddCommand(NewSearchCommand(out, store, vectorStore))
 
 	return rootCmd
 }

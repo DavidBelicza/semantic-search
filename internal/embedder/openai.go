@@ -14,12 +14,18 @@ import (
 
 const (
 	DefaultBaseURL        = "http://127.0.0.1:1234"
-	DefaultModel          = "text-embedding-model"
+	DefaultModel          = "text-embedding-embeddinggemma-300m-qat"
 	DefaultDimensions     = 768
 	DefaultMaxRetries     = 3
 	DefaultRequestTimeout = 60 * time.Second
 	DefaultBackoffBase    = 200 * time.Millisecond
 	DefaultBackoffMax     = 5 * time.Second
+
+	// EmbeddingGemma requires prompt templates: indexed passages use
+	// "title: none | text:" and queries use "task: search result | query:".
+	// Omitting them badly degrades ranking (junk can outrank relevant chunks).
+	DocumentPrefix = "title: none | text: "
+	QueryPrefix    = "task: search result | query: "
 )
 
 type OpenAIEmbedder struct {
@@ -29,6 +35,9 @@ type OpenAIEmbedder struct {
 	MaxRetries  int
 	BackoffBase time.Duration
 	HTTPClient  *http.Client
+	// Prefix is prepended to every input before embedding (e.g. a task prefix). The
+	// stored chunk text is unaffected; only the embedding input carries the prefix.
+	Prefix string
 }
 
 type openAIEmbeddingRequest struct {
@@ -98,12 +107,25 @@ func (e OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32,
 		return nil, err
 	}
 
-	body, err := encodeEmbeddingRequest(openAIEmbeddingRequest{Model: e.Model, Input: texts})
+	body, err := encodeEmbeddingRequest(openAIEmbeddingRequest{Model: e.Model, Input: e.applyPrefix(texts)})
 	if err != nil {
 		return nil, err
 	}
 
 	return e.embedWithRetry(ctx, endpoint, body, len(texts))
+}
+
+func (e OpenAIEmbedder) applyPrefix(texts []string) []string {
+	if e.Prefix == "" {
+		return texts
+	}
+
+	prefixed := make([]string, len(texts))
+	for i, text := range texts {
+		prefixed[i] = e.Prefix + text
+	}
+
+	return prefixed
 }
 
 func (e OpenAIEmbedder) embedWithRetry(ctx context.Context, endpoint string, body []byte, count int) ([][]float32, error) {

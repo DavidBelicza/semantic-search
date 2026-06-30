@@ -2,12 +2,28 @@ package lancedb
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
 
 	storage "semantic-search/internal/storage/sqlite"
 )
+
+func TestNormalizeProducesUnitVector(t *testing.T) {
+	got := normalize([]float32{3, 4})
+	if math.Abs(float64(got[0])-0.6) > 1e-6 || math.Abs(float64(got[1])-0.8) > 1e-6 {
+		t.Fatalf("normalize mismatch: %#v", got)
+	}
+}
+
+func TestNormalizeLeavesZeroVectorUnchanged(t *testing.T) {
+	for _, value := range normalize([]float32{0, 0, 0}) {
+		if value != 0 {
+			t.Fatal("expected zero vector to be returned unchanged")
+		}
+	}
+}
 
 func TestChunkVectorSchemaStoresOnlyChunkIDAndVector(t *testing.T) {
 	schema := chunkVectorSchema(3)
@@ -67,6 +83,48 @@ func TestValidateEmbeddingsUsesConfiguredDimensions(t *testing.T) {
 		{ChunkID: 12, Vector: []float32{0.1, 0.2}},
 	}, 3)
 	if err == nil {
+		t.Fatal("expected dimension mismatch error")
+	}
+}
+
+func TestStoreSearchReturnsNearestChunkIDs(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), 3)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	embeddings := []storage.ChunkEmbedding{
+		{ChunkID: 1, Vector: []float32{1, 0, 0}},
+		{ChunkID: 2, Vector: []float32{0, 1, 0}},
+		{ChunkID: 3, Vector: []float32{0, 0, 1}},
+	}
+	if err := store.Replace(ctx, embeddings); err != nil {
+		t.Fatalf("replace embeddings: %v", err)
+	}
+
+	hits, err := store.Search(ctx, []float32{0.9, 0.1, 0}, 2)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(hits) != 2 {
+		t.Fatalf("hit count mismatch: want 2, got %d", len(hits))
+	}
+	if hits[0].ChunkID != 1 {
+		t.Fatalf("nearest chunk id mismatch: want 1, got %d", hits[0].ChunkID)
+	}
+}
+
+func TestStoreSearchRejectsWrongDimensions(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), 3)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	if _, err := store.Search(ctx, []float32{0.1, 0.2}, 5); err == nil {
 		t.Fatal("expected dimension mismatch error")
 	}
 }

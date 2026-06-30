@@ -3,6 +3,7 @@ package lancedb
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -120,6 +121,99 @@ func (s *Store) Replace(ctx context.Context, embeddings []storage.ChunkEmbedding
 	return nil
 }
 
+type VectorHit struct {
+	ChunkID  int64
+	Distance float64
+}
+
+func (s *Store) Search(ctx context.Context, query []float32, limit int) ([]VectorHit, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	if len(query) != s.dimensions {
+		return nil, fmt.Errorf("query dimension mismatch: configured %d, got %d", s.dimensions, len(query))
+	}
+
+	// The bundled SDK ignores the requested distance metric and always uses L2, and
+	// the embedding model does not return unit vectors. Normalizing the query (and the
+	// stored vectors) makes L2 ranking equivalent to cosine similarity.
+	query = normalize(query)
+
+	table, err := s.currentTable(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := table.VectorSearch(ctx, vectorColumn, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("vector search: %w", err)
+	}
+
+	hits := make([]VectorHit, 0, len(rows))
+	for _, row := range rows {
+		chunkID, err := rowInt64(row, chunkIDColumn)
+		if err != nil {
+			return nil, err
+		}
+		hits = append(hits, VectorHit{ChunkID: chunkID, Distance: rowFloat64(row, distanceColumn)})
+	}
+
+	return hits, nil
+}
+
+func rowInt64(row map[string]interface{}, key string) (int64, error) {
+	value, ok := row[key]
+	if !ok {
+		return 0, fmt.Errorf("search result missing %q column", key)
+	}
+
+	switch typed := value.(type) {
+	case int64:
+		return typed, nil
+	case int32:
+		return int64(typed), nil
+	case int:
+		return int64(typed), nil
+	case uint64:
+		return int64(typed), nil
+	case float64:
+		return int64(typed), nil
+	default:
+		return 0, fmt.Errorf("unexpected type %T for %q column", value, key)
+	}
+}
+
+func rowFloat64(row map[string]interface{}, key string) float64 {
+	switch typed := row[key].(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	default:
+		return 0
+	}
+}
+
+// normalize scales a vector to unit length so that L2 distance ranks the same as
+// cosine similarity. A zero vector is returned unchanged.
+func normalize(vector []float32) []float32 {
+	var sumSquares float64
+	for _, value := range vector {
+		sumSquares += float64(value) * float64(value)
+	}
+	if sumSquares == 0 {
+		return vector
+	}
+
+	norm := float32(math.Sqrt(sumSquares))
+	normalized := make([]float32, len(vector))
+	for i, value := range vector {
+		normalized[i] = value / norm
+	}
+
+	return normalized
+}
+
 func (s *Store) openOrCreateTable(ctx context.Context) (contracts.ITable, error) {
 	if s.conn == nil {
 		return nil, fmt.Errorf("lancedb connection is required")
@@ -195,7 +289,7 @@ func embeddingsRecord(embeddings []storage.ChunkEmbedding, dimensions int) (arro
 	for _, embedding := range embeddings {
 		chunkIDBuilder.Append(embedding.ChunkID)
 		vectorBuilder.Append(true)
-		valueBuilder.AppendValues(embedding.Vector, nil)
+		valueBuilder.AppendValues(normalize(embedding.Vector), nil)
 	}
 
 	chunkIDArray := chunkIDBuilder.NewArray()

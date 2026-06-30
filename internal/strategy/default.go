@@ -63,6 +63,7 @@ type Result struct {
 func DefaultPool() Pool {
 	openAIEmbedder := embedder.NewOpenAIEmbedder(embedder.DefaultBaseURL, embedder.DefaultModel)
 	openAIEmbedder.Dimensions = embedder.DefaultDimensions
+	openAIEmbedder.Prefix = embedder.DocumentPrefix
 	return Pool{
 		{
 			Extensions: []string{".md", ".markdown", ".mdown"},

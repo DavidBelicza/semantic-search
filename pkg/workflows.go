@@ -14,6 +14,7 @@ type AppStore interface {
 	indexer.MetadataStore
 	scanner.Store
 	strategy.Store
+	SearchMetadataStore
 }
 
 type IndexStore interface {
@@ -22,7 +23,6 @@ type IndexStore interface {
 	strategy.Store
 }
 
-type VectorStore = strategy.VectorStore
 type StrategyPool = strategy.Pool
 
 // IndexOptions configures a single index run.

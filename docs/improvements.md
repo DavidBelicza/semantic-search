@@ -69,6 +69,26 @@ chunks (newlines, UTF-8 `§`/`'`/`%C3%A9`, raw `&<>` in URLs, code fences/backti
 and asserts valid JSON, byte-identical decode (no double-escaping/mojibake), and
 that `SetEscapeHTML(false)` keeps `&<>` raw (no `\u00XX`). (§11.1)
 
+### E6. Embedding model id and task prefixes — ✅ done (relevance fix)
+Search returned irrelevant, tiny results. Root cause was **not** the distance metric
+(the model already returns unit vectors, so L2 is cosine-equivalent — confirmed by
+inspecting stored norms = 1.0). Two real causes:
+- The default model id was the placeholder `text-embedding-model`, which LM Studio
+  does not recognize (returns HTTP 400); set the default to the real
+  `text-embedding-nomic-embed-text-v1.5`.
+- nomic-embed requires task prefixes. The embedder now prepends a configurable
+  `Prefix`: `search_document:` for indexed chunks ([strategy.DefaultPool](../internal/strategy/default.go))
+  and `search_query:` for the query ([cmd/search.go](../cmd/search.go)). The stored
+  chunk text is unchanged; only the embedding input carries the prefix.
+
+After re-embedding (`rebuild`), `search 3 payment` and `search 3 data` return the
+relevant chunks (tax/payout note; Google Cloud storage/database note).
+
+**Follow-up:** the model id, base URL, dimensions, and prefixes are hardcoded to a
+nomic setup. They should become `--embedding-model` / `--embedding-url` flags (§5) so
+other models (e.g. EmbeddingGemma, which needs different prefixes) work without code
+changes. Changing the model or its prefixes requires a full re-embed.
+
 ### E5. Configured-dimension validation happens too late — ✅ done
 ~~The embedder never validated returned vectors against the configured dimension.~~
 Fixed: `OpenAIEmbedder.Dimensions` (set to `DefaultDimensions` in
