@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 
-	"semantic-search/internal/storage"
+	storage "semantic-search/internal/storage/sqlite"
 )
 
 const scanBatchSize = 1

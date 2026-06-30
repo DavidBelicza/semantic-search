@@ -80,6 +80,10 @@ cmd/
   index.go
   search.go
 
+pkg/
+  workflows.go
+  app/
+
 internal/
   config/
   crawler/
@@ -90,10 +94,14 @@ internal/
   tokenizer/
   embedder/
   storage/
-  vectorstore/
+    sqlite/
+    lancedb/
   indexer/
   search/
   output/
+
+migrations/
+  sqlite/
 
 main.go
 ```
@@ -242,7 +250,7 @@ Requirements:
 - Database initialization must verify that SQLite and LanceDB both open successfully.
 - Startup must fail with a clear error when the LanceDB native dependency is missing or incompatible.
 
-Keep all LanceDB-specific schema and SDK calls isolated inside the `vectorstore` package so that backend details do not affect command handlers or the indexing pipeline.
+Keep all LanceDB-specific schema and SDK calls isolated inside `internal/storage/lancedb` so that backend details do not affect command handlers or the indexing pipeline. Keep SQLite schema files in `migrations/sqlite` and SQLite persistence code in `internal/storage/sqlite`.
 
 ---
 
@@ -1232,9 +1240,10 @@ Example:
 
 ```text
 migrations/
-  001_initial.sql
-  002_add_document_state.sql
-  003_add_heading_path.sql
+  sqlite/
+    001_initial.sql
+    002_add_document_state.sql
+    003_add_heading_path.sql
 ```
 
 Store the active schema version in `index_metadata`.
@@ -1343,7 +1352,7 @@ embedding provider:     LM Studio
 
 - Verify the exact LanceDB Go SDK behavior against the version included in the project before writing migrations.
 - Do not model LanceDB as a SQLite extension.
-- Keep LanceDB queries isolated in one package.
+- Keep LanceDB queries isolated in `internal/storage/lancedb`.
 - Do not substitute `sqlite-vec` or another vector backend unless explicitly requested.
 - Do not implement a server.
 - Do not use an LLM for chunking.

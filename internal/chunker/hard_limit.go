@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"math"
 
-	"semantic-search/internal/storage"
+	storage "semantic-search/internal/storage/sqlite"
 )
 
 const (

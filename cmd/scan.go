@@ -2,26 +2,20 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"io"
 
 	"github.com/spf13/cobra"
 
-	"semantic-search/internal/scanner"
+	semanticsearch "semantic-search/pkg"
 )
 
-func NewScanCommand(out io.Writer, store scanner.Store) *cobra.Command {
+func NewScanCommand(out io.Writer, store semanticsearch.AppStore) *cobra.Command {
 	scanCmd := &cobra.Command{
 		Use:   "scan",
 		Short: "Scan indexed files for content changes",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if store == nil {
-				return errors.New("document store is required")
-			}
-
-			_, err := scanner.ScanIndexedDocuments(context.Background(), store)
-			return err
+			return semanticsearch.Scan(context.Background(), store)
 		},
 	}
 

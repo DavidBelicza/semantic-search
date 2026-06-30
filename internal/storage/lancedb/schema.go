@@ -1,4 +1,4 @@
-package vectorstore
+package lancedb
 
 import (
 	"fmt"

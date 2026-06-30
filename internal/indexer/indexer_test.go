@@ -11,7 +11,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"semantic-search/internal/crawler"
-	"semantic-search/internal/storage"
+	storage "semantic-search/internal/storage/sqlite"
 	"semantic-search/internal/strategy"
 )
 

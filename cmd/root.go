@@ -5,21 +5,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"semantic-search/internal/indexer"
-	"semantic-search/internal/scanner"
-	"semantic-search/internal/strategy"
+	semanticsearch "semantic-search/pkg"
 )
 
 const appName = "semantic-search"
 const DefaultDatabasePath = "vector-index.db"
 
-type AppStore interface {
-	indexer.MetadataStore
-	scanner.Store
-	strategy.Store
-}
-
-func NewRootCommand(out io.Writer, store AppStore, vectorStore strategy.VectorStore) *cobra.Command {
+func NewRootCommand(out io.Writer, store semanticsearch.AppStore, vectorStore semanticsearch.VectorStore) *cobra.Command {
 	var databasePath string
 
 	rootCmd := &cobra.Command{

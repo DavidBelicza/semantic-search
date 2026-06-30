@@ -10,7 +10,7 @@ import (
 	"semantic-search/internal/embedder"
 	"semantic-search/internal/parser"
 	"semantic-search/internal/reader"
-	"semantic-search/internal/storage"
+	storage "semantic-search/internal/storage/sqlite"
 )
 
 const strategyBatchSize = 1

@@ -1,4 +1,4 @@
-package vectorstore
+package lancedb
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 
 	"github.com/apache/arrow/go/v17/arrow"
 
-	"semantic-search/internal/storage"
+	storage "semantic-search/internal/storage/sqlite"
 )
 
 func TestChunkVectorSchemaStoresOnlyChunkIDAndVector(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"semantic-search/internal/chunker"
-	"semantic-search/internal/storage"
+	storage "semantic-search/internal/storage/sqlite"
 )
 
 func TestDefaultPoolSupportsMarkdownOnly(t *testing.T) {

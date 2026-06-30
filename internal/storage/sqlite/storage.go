@@ -1,19 +1,16 @@
-package storage
+package sqlite
 
 import (
 	"context"
 	"database/sql"
-	_ "embed"
 	"errors"
 	"fmt"
 
 	_ "github.com/mattn/go-sqlite3"
 
 	"semantic-search/internal/crawler"
+	sqlitemigrations "semantic-search/migrations/sqlite"
 )
-
-//go:embed schema.sql
-var schemaSQL string
 
 type Store struct {
 	db *sql.DB
@@ -80,7 +77,7 @@ func (s *Store) DB() *sql.DB {
 }
 
 func (s *Store) EnsureSchema(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, schemaSQL)
+	_, err := s.db.ExecContext(ctx, sqlitemigrations.SchemaSQL)
 	return err
 }
 

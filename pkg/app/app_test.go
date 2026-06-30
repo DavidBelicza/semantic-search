@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ func TestRunShowsHelp(t *testing.T) {
 	var stderr bytes.Buffer
 	dbPath := filepath.Join(t.TempDir(), "index.db")
 
-	if err := run([]string{"--db", dbPath, "--help"}, &stdout, &stderr); err != nil {
+	if err := Run([]string{"--db", dbPath, "--help"}, &stdout, &stderr); err != nil {
 		t.Fatalf("run help: %v", err)
 	}
 
@@ -52,7 +52,7 @@ func TestDatabasePathFromArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := databasePathFromArgs(tt.args)
+			got, err := DatabasePathFromArgs(tt.args)
 			if err != nil {
 				t.Fatalf("database path from args: %v", err)
 			}
@@ -88,7 +88,7 @@ func TestVectorDatabasePath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := vectorDatabasePath(tt.path)
+			got := VectorDatabasePath(tt.path)
 			if got != tt.want {
 				t.Fatalf("vector database path mismatch: want %q, got %q", tt.want, got)
 			}

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"semantic-search/internal/storage"
+	storage "semantic-search/internal/storage/sqlite"
 )
 
 func TestHashFileReturnsSHA256Hex(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"semantic-search/internal/storage"
+	storage "semantic-search/internal/storage/sqlite"
 )
 
 type MarkdownReader struct{}

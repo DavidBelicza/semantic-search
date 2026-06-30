@@ -15,7 +15,7 @@ import (
 	"semantic-search/internal/crawler"
 	"semantic-search/internal/parser"
 	"semantic-search/internal/reader"
-	"semantic-search/internal/storage"
+	storage "semantic-search/internal/storage/sqlite"
 	"semantic-search/internal/strategy"
 )
 

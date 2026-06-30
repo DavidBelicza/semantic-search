@@ -1,4 +1,4 @@
-package vectorstore
+package lancedb
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/lancedb/lancedb-go/pkg/contracts"
 	"github.com/lancedb/lancedb-go/pkg/lancedb"
 
-	"semantic-search/internal/storage"
+	storage "semantic-search/internal/storage/sqlite"
 )
 
 type Store struct {
