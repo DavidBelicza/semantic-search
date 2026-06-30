@@ -8,7 +8,7 @@ import (
 
 func TestNewRootCommandShowsHelp(t *testing.T) {
 	var out bytes.Buffer
-	rootCmd := NewRootCommand(&out, &fakeDocumentStore{})
+	rootCmd := NewRootCommand(&out, &fakeDocumentStore{}, &fakeVectorStore{})
 	rootCmd.SetArgs([]string{"--help"})
 
 	if err := rootCmd.Execute(); err != nil {
@@ -28,5 +28,8 @@ func TestNewRootCommandShowsHelp(t *testing.T) {
 
 	if !strings.Contains(help, "--db") {
 		t.Fatalf("help output does not contain db flag: %q", help)
+	}
+	if !strings.Contains(help, "--vector") {
+		t.Fatalf("help output does not contain vector flag: %q", help)
 	}
 }

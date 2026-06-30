@@ -60,17 +60,24 @@ func TestProcessScannedDocumentsStoresChunksAndMarksChunked(t *testing.T) {
 				Status:       storage.DocumentStatusScanned,
 			},
 		},
+		chunks: map[int64][]storage.Chunk{
+			42: {
+				{ID: 99, DocumentID: 42, ChunkIndex: 0, Text: "old"},
+			},
+		},
 	}
+	vectorStore := &memoryVectorStore{}
 	pool := Pool{
 		{
 			Extensions: []string{".md"},
 			Reader:     fakeReader{text: "abcdefg"},
 			Parser:     fakeParser{},
 			Chunker:    chunker.HardLimitChunker{MaxTokens: 3, AverageTokenLength: 1},
+			Embedder:   fakeEmbedder{},
 		},
 	}
 
-	result, err := ProcessScannedDocuments(context.Background(), store, pool)
+	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool)
 	if err != nil {
 		t.Fatalf("process scanned documents: %v", err)
 	}
@@ -83,6 +90,54 @@ func TestProcessScannedDocumentsStoresChunksAndMarksChunked(t *testing.T) {
 	}
 	if len(store.chunks[42]) != 3 {
 		t.Fatalf("stored chunk count mismatch: want 3, got %d", len(store.chunks[42]))
+	}
+	if len(vectorStore.deleted) != 1 || vectorStore.deleted[0] != 99 {
+		t.Fatalf("deleted vector ids mismatch: %#v", vectorStore.deleted)
+	}
+}
+
+func TestProcessChunkedDocumentsStoresEmbeddingsAndMarksDone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "note.md")
+	store := &memoryStrategyStore{
+		documents: []storage.Document{
+			{
+				ID:           42,
+				FileID:       "1:100",
+				AbsolutePath: path,
+				Status:       storage.DocumentStatusChunked,
+			},
+		},
+		chunks: map[int64][]storage.Chunk{
+			42: {
+				{ID: 100, DocumentID: 42, ChunkIndex: 0, Text: "hello"},
+				{ID: 101, DocumentID: 42, ChunkIndex: 1, Text: "world"},
+			},
+		},
+	}
+	vectorStore := &memoryVectorStore{}
+	pool := Pool{
+		{
+			Extensions: []string{".md"},
+			Reader:     fakeReader{},
+			Parser:     fakeParser{},
+			Chunker:    chunker.HardLimitChunker{MaxTokens: 3, AverageTokenLength: 1},
+			Embedder:   fakeEmbedder{},
+		},
+	}
+
+	result, err := ProcessChunkedDocuments(context.Background(), store, vectorStore, pool)
+	if err != nil {
+		t.Fatalf("process chunked documents: %v", err)
+	}
+
+	if result.Embedded != 1 {
+		t.Fatalf("embedded count mismatch: want 1, got %d", result.Embedded)
+	}
+	if store.documents[0].Status != storage.DocumentStatusDone {
+		t.Fatalf("status mismatch: want done, got %q", store.documents[0].Status)
+	}
+	if len(vectorStore.embeddings) != 2 {
+		t.Fatalf("embedding count mismatch: want 2, got %d", len(vectorStore.embeddings))
 	}
 }
 
@@ -98,6 +153,16 @@ type fakeParser struct{}
 
 func (p fakeParser) Parse(ctx context.Context, text string) (string, error) {
 	return text, nil
+}
+
+type fakeEmbedder struct{}
+
+func (e fakeEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	vectors := make([][]float32, len(texts))
+	for i := range texts {
+		vectors[i] = []float32{float32(i), float32(len(texts[i]))}
+	}
+	return vectors, nil
 }
 
 type memoryStrategyStore struct {
@@ -131,5 +196,34 @@ func (s *memoryStrategyStore) ReplaceDocumentChunksAndStatus(ctx context.Context
 		}
 	}
 
+	return nil
+}
+
+func (s *memoryStrategyStore) ChunksByDocumentID(ctx context.Context, documentID int64) ([]storage.Chunk, error) {
+	return s.chunks[documentID], nil
+}
+
+func (s *memoryStrategyStore) UpdateDocumentStatus(ctx context.Context, fileID string, status string) error {
+	for i := range s.documents {
+		if s.documents[i].FileID == fileID {
+			s.documents[i].Status = status
+		}
+	}
+
+	return nil
+}
+
+type memoryVectorStore struct {
+	deleted    []int64
+	embeddings []storage.ChunkEmbedding
+}
+
+func (s *memoryVectorStore) Delete(ctx context.Context, chunkIDs []int64) error {
+	s.deleted = append(s.deleted, chunkIDs...)
+	return nil
+}
+
+func (s *memoryVectorStore) Replace(ctx context.Context, embeddings []storage.ChunkEmbedding) error {
+	s.embeddings = append(s.embeddings, embeddings...)
 	return nil
 }

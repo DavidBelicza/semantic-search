@@ -11,13 +11,17 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"semantic-search/internal/chunker"
 	"semantic-search/internal/crawler"
+	"semantic-search/internal/parser"
+	"semantic-search/internal/reader"
 	"semantic-search/internal/storage"
+	"semantic-search/internal/strategy"
 )
 
 func TestNewIndexCommandShowsHelp(t *testing.T) {
 	var out bytes.Buffer
-	indexCmd := NewIndexCommand(&out, &fakeDocumentStore{})
+	indexCmd := NewIndexCommand(&out, &fakeDocumentStore{}, &fakeVectorStore{})
 	indexCmd.SetArgs([]string{"--help"})
 
 	if err := indexCmd.Execute(); err != nil {
@@ -32,7 +36,7 @@ func TestNewIndexCommandShowsHelp(t *testing.T) {
 
 func TestNewIndexCommandRequiresPath(t *testing.T) {
 	var out bytes.Buffer
-	indexCmd := NewIndexCommand(&out, &fakeDocumentStore{})
+	indexCmd := NewIndexCommand(&out, &fakeDocumentStore{}, &fakeVectorStore{})
 	indexCmd.SetArgs([]string{})
 
 	if err := indexCmd.Execute(); err == nil {
@@ -70,7 +74,8 @@ func TestNewIndexCommandStoresMetadataAndScansContent(t *testing.T) {
 		t.Fatalf("ensure schema: %v", err)
 	}
 
-	indexCmd := NewIndexCommand(&out, store)
+	vectorStore := &fakeVectorStore{}
+	indexCmd := NewIndexCommandWithPool(&out, store, vectorStore, fakeIndexStrategyPool())
 	indexCmd.SetArgs([]string{root})
 
 	if err := indexCmd.Execute(); err != nil {
@@ -95,12 +100,12 @@ func TestNewIndexCommandStoresMetadataAndScansContent(t *testing.T) {
 		t.Fatalf("document count mismatch: want 3, got %d", count)
 	}
 
-	var chunkedCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM documents WHERE content_hash IS NOT NULL AND status = ?", storage.DocumentStatusChunked).Scan(&chunkedCount); err != nil {
-		t.Fatalf("count chunked documents: %v", err)
+	var doneCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM documents WHERE content_hash IS NOT NULL AND status = ?", storage.DocumentStatusDone).Scan(&doneCount); err != nil {
+		t.Fatalf("count done documents: %v", err)
 	}
-	if chunkedCount != 3 {
-		t.Fatalf("chunked document count mismatch: want 3, got %d", chunkedCount)
+	if doneCount != 3 {
+		t.Fatalf("done document count mismatch: want 3, got %d", doneCount)
 	}
 
 	var chunkCount int
@@ -109,6 +114,10 @@ func TestNewIndexCommandStoresMetadataAndScansContent(t *testing.T) {
 	}
 	if chunkCount != 3 {
 		t.Fatalf("chunk count mismatch: want 3, got %d", chunkCount)
+	}
+
+	if len(vectorStore.embeddings) != 3 {
+		t.Fatalf("embedding count mismatch: want 3, got %d", len(vectorStore.embeddings))
 	}
 }
 
@@ -130,6 +139,51 @@ func (s *fakeDocumentStore) UpdateDocumentScanCheckpointAndStatus(ctx context.Co
 	return nil
 }
 
+func (s *fakeDocumentStore) UpdateDocumentStatus(ctx context.Context, fileID string, status string) error {
+	return nil
+}
+
 func (s *fakeDocumentStore) ReplaceDocumentChunksAndStatus(ctx context.Context, documentID int64, chunks []storage.Chunk, status string) error {
 	return nil
+}
+
+func (s *fakeDocumentStore) ChunksByDocumentID(ctx context.Context, documentID int64) ([]storage.Chunk, error) {
+	return nil, nil
+}
+
+type fakeVectorStore struct {
+	deleted    []int64
+	embeddings []storage.ChunkEmbedding
+}
+
+func (s *fakeVectorStore) Delete(ctx context.Context, chunkIDs []int64) error {
+	s.deleted = append(s.deleted, chunkIDs...)
+	return nil
+}
+
+func (s *fakeVectorStore) Replace(ctx context.Context, embeddings []storage.ChunkEmbedding) error {
+	s.embeddings = append(s.embeddings, embeddings...)
+	return nil
+}
+
+type fakeIndexEmbedder struct{}
+
+func (e fakeIndexEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	vectors := make([][]float32, len(texts))
+	for i := range texts {
+		vectors[i] = []float32{float32(i), float32(len(texts[i]))}
+	}
+	return vectors, nil
+}
+
+func fakeIndexStrategyPool() strategy.Pool {
+	return strategy.Pool{
+		{
+			Extensions: []string{".md", ".markdown", ".mdown"},
+			Reader:     reader.MarkdownReader{},
+			Parser:     parser.MarkdownParser{},
+			Chunker:    chunker.NewHardLimitChunker(chunker.DefaultMaxTokens),
+			Embedder:   fakeIndexEmbedder{},
+		},
+	}
 }

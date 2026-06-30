@@ -88,7 +88,7 @@ internal/
   chunker/
   strategy/
   tokenizer/
-  embedding/
+  embedder/
   storage/
   vectorstore/
   indexer/
@@ -131,7 +131,7 @@ Recommended flags:
 
 ```text
 --db                 SQLite database path
---vectorlite-path    Path to the Vectorlite native extension
+--vector             Path to the Vectorlite native extension
 --embedding-url      LM Studio embeddings endpoint
 --embedding-model    Model identifier sent to LM Studio
 --max-tokens         Maximum tokens per chunk
@@ -167,7 +167,7 @@ Recommended flags:
 
 ```text
 --db                   SQLite database path
---vectorlite-path      Path to the Vectorlite native extension
+--vector               Path to the Vectorlite native extension
 --embedding-url        LM Studio embeddings endpoint
 --embedding-model      Model identifier
 --limit                 Number of documents to return
@@ -211,6 +211,7 @@ Suggested defaults:
 ```text
 database:             ./vector-index.db
 embedding URL:        http://127.0.0.1:1234/v1/embeddings
+embedding dimensions: 768
 max tokens:           500
 overlap tokens:       50
 embedding batch size: 16
@@ -236,7 +237,7 @@ Conceptual initialization:
 ```go
 sql.Register("sqlite3_vectorlite", &sqlite3.SQLiteDriver{
     Extensions: []string{
-        vectorlitePath,
+        vectorPath,
     },
 })
 
@@ -302,21 +303,7 @@ CREATE TABLE IF NOT EXISTS chunks (
 );
 ```
 
-### 7.3 Embedding metadata
-
-```sql
-CREATE TABLE IF NOT EXISTS embedding_profiles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    model TEXT NOT NULL,
-    dimensions INTEGER NOT NULL,
-    endpoint TEXT NOT NULL,
-    distance_metric TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(model, dimensions, distance_metric)
-);
-```
-
-### 7.4 Index metadata
+### 7.3 Index metadata
 
 ```sql
 CREATE TABLE IF NOT EXISTS index_metadata (
@@ -329,16 +316,14 @@ Store at least:
 
 ```text
 schema_version
-embedding_model
-embedding_dimensions
 distance_metric
 chunk_max_tokens
 chunk_overlap_tokens
 ```
 
-### 7.5 Vector table
+### 7.4 Vector table
 
-Create one Vectorlite row per chunk.
+Create one Vectorlite row per chunk. Do not store vectors in a normal SQLite table.
 
 Conceptually:
 
@@ -631,19 +616,14 @@ Handle the standard OpenAI-compatible response:
 ```go
 type Embedder interface {
     Embed(ctx context.Context, texts []string) ([][]float32, error)
-    Model() string
 }
 ```
 
 ### 11.4 Validation
 
-On the first successful embedding response:
-
-- Determine vector dimensions.
-- Store dimensions in `embedding_profiles`.
-- Ensure all later vectors have exactly the same dimensions.
-- Refuse to mix vectors from different models or dimensions in the same index.
-- Refuse search when the configured model differs from the indexed model, unless a full reindex is requested.
+- Create the Vectorlite table at application startup using the configured embedding dimensions.
+- Ensure every returned embedding vector matches the configured dimensions.
+- Refuse vectors with incompatible dimensions.
 
 ### 11.5 Batching
 
@@ -721,7 +701,7 @@ done
 failed
 ```
 
-The CLI `index` command orchestrates the internal stages in order. The index stage crawls and stores filesystem metadata, then marks records as `indexed`. The scan stage reads `indexed` records one by one, compares current metadata with the previous scan checkpoint, hashes files when metadata differs, stores changed content hashes, and advances records to `scanned` or `done`. The chunking stage reads `scanned` records one by one, replaces their chunk rows, and advances them to `chunked`. A later embedding stage will advance records through `embedded` and `done`.
+The CLI `index` command orchestrates the internal stages in order. The index stage crawls and stores filesystem metadata, then marks records as `indexed`. The scan stage reads `indexed` records one by one, compares current metadata with the previous scan checkpoint, hashes files when metadata differs, stores changed content hashes, and advances records to `scanned` or `done`. The chunking stage reads `scanned` records one by one, replaces their chunk rows, and advances them to `chunked`. The embedding stage reads `chunked` records one by one, stores chunk embeddings, and advances completed documents to `done`.
 
 Search must only include documents that have completed the required downstream stages.
 

@@ -2,12 +2,15 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	_ "embed"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 
-	_ "github.com/mattn/go-sqlite3"
+	sqlite3 "github.com/mattn/go-sqlite3"
 
 	"semantic-search/internal/crawler"
 )
@@ -43,6 +46,8 @@ type Document struct {
 }
 
 type Chunk struct {
+	ID          int64
+	DocumentID  int64
 	ChunkIndex  int
 	Text        string
 	TokenCount  int
@@ -51,9 +56,40 @@ type Chunk struct {
 	ContentHash string
 }
 
+type ChunkEmbedding struct {
+	ChunkID int64
+	Vector  []float32
+}
+
 func Open(path string) (*Store, error) {
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	return &Store{db: db}, nil
+}
+
+func OpenWithExtensions(path string, extensions []string) (*Store, error) {
+	if len(extensions) == 0 {
+		return Open(path)
+	}
+
+	driverName := driverNameForExtensions(extensions)
+	if !driverRegistered(driverName) {
+		sql.Register(driverName, &sqlite3.SQLiteDriver{Extensions: extensions})
+	}
+
+	db, err := sql.Open(driverName, path)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		db.Close()
 		return nil, err
 	}
 
@@ -62,6 +98,25 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+func (s *Store) DB() *sql.DB {
+	return s.db
+}
+
+func driverNameForExtensions(extensions []string) string {
+	hash := sha256.Sum256([]byte(strings.Join(extensions, "\x00")))
+	return "sqlite3_ext_" + hex.EncodeToString(hash[:8])
+}
+
+func driverRegistered(name string) bool {
+	for _, driver := range sql.Drivers() {
+		if driver == name {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (s *Store) EnsureSchema(ctx context.Context) error {
@@ -258,6 +313,41 @@ WHERE id = ?`, status, documentID)
 	}
 
 	return tx.Commit()
+}
+
+func (s *Store) ChunksByDocumentID(ctx context.Context, documentID int64) ([]Chunk, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, document_id, chunk_index, text, token_count, start_offset, end_offset, content_hash
+FROM chunks
+WHERE document_id = ?
+ORDER BY chunk_index`, documentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var chunks []Chunk
+	for rows.Next() {
+		var chunk Chunk
+		if err := rows.Scan(
+			&chunk.ID,
+			&chunk.DocumentID,
+			&chunk.ChunkIndex,
+			&chunk.Text,
+			&chunk.TokenCount,
+			&chunk.StartOffset,
+			&chunk.EndOffset,
+			&chunk.ContentHash,
+		); err != nil {
+			return nil, err
+		}
+		chunks = append(chunks, chunk)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return chunks, nil
 }
 
 func (s *Store) updateDocument(ctx context.Context, query string, args ...any) error {

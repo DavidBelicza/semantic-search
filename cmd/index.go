@@ -18,7 +18,11 @@ type IndexStore interface {
 	strategy.Store
 }
 
-func NewIndexCommand(out io.Writer, store IndexStore) *cobra.Command {
+func NewIndexCommand(out io.Writer, store IndexStore, vectorStore strategy.VectorStore) *cobra.Command {
+	return NewIndexCommandWithPool(out, store, vectorStore, strategy.DefaultPool())
+}
+
+func NewIndexCommandWithPool(out io.Writer, store IndexStore, vectorStore strategy.VectorStore, strategyPool strategy.Pool) *cobra.Command {
 	indexCmd := &cobra.Command{
 		Use:   "index [path]",
 		Short: "Index Markdown files from a directory",
@@ -27,9 +31,11 @@ func NewIndexCommand(out io.Writer, store IndexStore) *cobra.Command {
 			if store == nil {
 				return errors.New("document store is required")
 			}
+			if vectorStore == nil {
+				return errors.New("vector store is required")
+			}
 
 			ctx := context.Background()
-			strategyPool := strategy.DefaultPool()
 			if err := indexer.IndexPath(ctx, store, args[0], strategyPool); err != nil {
 				return err
 			}
@@ -38,7 +44,11 @@ func NewIndexCommand(out io.Writer, store IndexStore) *cobra.Command {
 				return err
 			}
 
-			_, err := strategy.ProcessScannedDocuments(ctx, store, strategyPool)
+			if _, err := strategy.ProcessScannedDocuments(ctx, store, vectorStore, strategyPool); err != nil {
+				return err
+			}
+
+			_, err := strategy.ProcessChunkedDocuments(ctx, store, vectorStore, strategyPool)
 			return err
 		},
 	}

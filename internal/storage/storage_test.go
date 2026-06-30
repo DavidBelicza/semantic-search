@@ -28,6 +28,20 @@ func TestEnsureSchemaCreatesDocumentsTable(t *testing.T) {
 	if tableName != "documents" {
 		t.Fatalf("table mismatch: want documents, got %q", tableName)
 	}
+
+	for _, wantTable := range []string{"chunks"} {
+		err := store.db.QueryRowContext(
+			context.Background(),
+			"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+			wantTable,
+		).Scan(&tableName)
+		if err != nil {
+			t.Fatalf("query %s table: %v", wantTable, err)
+		}
+		if tableName != wantTable {
+			t.Fatalf("table mismatch: want %s, got %q", wantTable, tableName)
+		}
+	}
 }
 
 func TestUpsertDocumentsInsertsAndUpdatesInBatch(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 
 const appName = "semantic-search"
 const DefaultDatabasePath = "vector-index.db"
+const DefaultVectorPath = ""
 
 type AppStore interface {
 	indexer.MetadataStore
@@ -19,8 +20,9 @@ type AppStore interface {
 	strategy.Store
 }
 
-func NewRootCommand(out io.Writer, store AppStore) *cobra.Command {
+func NewRootCommand(out io.Writer, store AppStore, vectorStore strategy.VectorStore) *cobra.Command {
 	var databasePath string
+	var vectorPath string
 
 	rootCmd := &cobra.Command{
 		Use:   appName,
@@ -31,9 +33,10 @@ func NewRootCommand(out io.Writer, store AppStore) *cobra.Command {
 	}
 
 	rootCmd.PersistentFlags().StringVar(&databasePath, "db", DefaultDatabasePath, "SQLite database path")
+	rootCmd.PersistentFlags().StringVar(&vectorPath, "vector", DefaultVectorPath, "Vectorlite native extension path")
 	rootCmd.SetOut(out)
 	rootCmd.SetErr(out)
-	rootCmd.AddCommand(NewIndexCommand(out, store))
+	rootCmd.AddCommand(NewIndexCommand(out, store, vectorStore))
 	rootCmd.AddCommand(NewScanCommand(out, store))
 	rootCmd.AddCommand(NewSearchCommand(out))
 
