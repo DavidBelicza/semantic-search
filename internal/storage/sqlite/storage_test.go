@@ -44,6 +44,53 @@ func TestEnsureSchemaCreatesDocumentsTable(t *testing.T) {
 	}
 }
 
+func TestEnsureSchemaMigratesOldDocumentStatuses(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+
+	if _, err := store.db.ExecContext(ctx, `
+CREATE TABLE documents (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	file_id TEXT NOT NULL,
+	absolute_path TEXT NOT NULL,
+	file_size INTEGER NOT NULL,
+	modified_at_ns INTEGER NOT NULL,
+	content_hash TEXT,
+	scanned_file_size INTEGER,
+	scanned_modified_at_ns INTEGER,
+	status TEXT NOT NULL DEFAULT 'indexed' CHECK(status IN ('indexed', 'scanned', 'done', 'failed')),
+	indexed_at_unix INTEGER,
+	deleted_at_unix INTEGER,
+	created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	UNIQUE(file_id)
+)`); err != nil {
+		t.Fatalf("create old documents table: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, `
+INSERT INTO documents (file_id, absolute_path, file_size, modified_at_ns, content_hash, scanned_file_size, scanned_modified_at_ns, status)
+VALUES ('1:100', '/tmp/docs/README.md', 10, 100, 'hash', 10, 100, 'done')`); err != nil {
+		t.Fatalf("insert old document: %v", err)
+	}
+
+	if err := store.EnsureSchema(ctx); err != nil {
+		t.Fatalf("ensure schema: %v", err)
+	}
+
+	var status string
+	if err := store.db.QueryRowContext(ctx, "SELECT status FROM documents WHERE file_id = '1:100'").Scan(&status); err != nil {
+		t.Fatalf("query migrated status: %v", err)
+	}
+	if status != DocumentStatusIndexed {
+		t.Fatalf("status mismatch: want indexed, got %q", status)
+	}
+
+	if _, err := store.db.ExecContext(ctx, "UPDATE documents SET status = ? WHERE file_id = '1:100'", DocumentStatusEmbedded); err != nil {
+		t.Fatalf("new embedded status should satisfy migrated constraint: %v", err)
+	}
+}
+
 func TestUpsertDocumentsInsertsAndUpdatesInBatch(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
@@ -68,6 +115,10 @@ func TestUpsertDocumentsInsertsAndUpdatesInBatch(t *testing.T) {
 
 	if err := store.UpsertDocuments(ctx, []crawler.FileMetadata{first, second}); err != nil {
 		t.Fatalf("insert documents: %v", err)
+	}
+
+	if err := store.UpdateDocumentStatus(ctx, second.FileID, DocumentStatusEmbedded); err != nil {
+		t.Fatalf("mark second embedded: %v", err)
 	}
 
 	if err := store.UpsertDocuments(ctx, []crawler.FileMetadata{first, second}); err != nil {
@@ -128,6 +179,9 @@ ORDER BY file_id`)
 	if got["1:200"].size != 20 {
 		t.Fatalf("second document changed unexpectedly: %#v", got["1:200"])
 	}
+	if got["1:200"].status != DocumentStatusEmbedded {
+		t.Fatalf("second document status mismatch: want embedded, got %q", got["1:200"].status)
+	}
 }
 
 func TestDocumentsByStatusAndScanUpdates(t *testing.T) {
@@ -173,20 +227,20 @@ func TestDocumentsByStatusAndScanUpdates(t *testing.T) {
 		t.Fatalf("scanned document mismatch: %#v", documents)
 	}
 
-	if err := store.UpdateDocumentScanCheckpointAndStatus(ctx, file.FileID, DocumentStatusDone); err != nil {
+	if err := store.UpdateDocumentScanCheckpointAndStatus(ctx, file.FileID, DocumentStatusEmbedded); err != nil {
 		t.Fatalf("update scan checkpoint and status: %v", err)
 	}
 
-	documents, err = store.DocumentsByStatus(ctx, DocumentStatusDone, 10)
+	documents, err = store.DocumentsByStatus(ctx, DocumentStatusEmbedded, 10)
 	if err != nil {
-		t.Fatalf("documents by done status: %v", err)
+		t.Fatalf("documents by embedded status: %v", err)
 	}
 	if len(documents) != 1 || !documents[0].HasScannedMetadata {
-		t.Fatalf("done document mismatch: %#v", documents)
+		t.Fatalf("embedded document mismatch: %#v", documents)
 	}
 }
 
-func TestReplaceDocumentChunksAndStatus(t *testing.T) {
+func TestApplyDocumentChunkReconcileKeepsInsertsAndDeletes(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
 	defer store.Close()
@@ -217,8 +271,13 @@ func TestReplaceDocumentChunksAndStatus(t *testing.T) {
 		{ChunkIndex: 0, Text: "hello", TokenCount: 2, StartOffset: 0, EndOffset: 5, ContentHash: "hash-1"},
 		{ChunkIndex: 1, Text: "world", TokenCount: 2, StartOffset: 5, EndOffset: 10, ContentHash: "hash-2"},
 	}
-	if err := store.ReplaceDocumentChunksAndStatus(ctx, documents[0].ID, chunks, DocumentStatusChunked); err != nil {
-		t.Fatalf("replace chunks: %v", err)
+	initialPlan := ReconcileChunks(nil, chunks)
+	inserted, err := store.ApplyDocumentChunkReconcile(ctx, documents[0].ID, initialPlan)
+	if err != nil {
+		t.Fatalf("apply initial chunks: %v", err)
+	}
+	if len(inserted) != 2 {
+		t.Fatalf("inserted chunk count mismatch: want 2, got %d", len(inserted))
 	}
 
 	var chunkCount int
@@ -229,22 +288,63 @@ func TestReplaceDocumentChunksAndStatus(t *testing.T) {
 		t.Fatalf("chunk count mismatch: want 2, got %d", chunkCount)
 	}
 
-	documents, err = store.DocumentsByStatus(ctx, DocumentStatusChunked, 1)
+	existing, err := store.ChunksByDocumentID(ctx, documents[0].ID)
 	if err != nil {
-		t.Fatalf("documents by chunked status: %v", err)
-	}
-	if len(documents) != 1 {
-		t.Fatalf("chunked document count mismatch: want 1, got %d", len(documents))
+		t.Fatalf("load existing chunks: %v", err)
 	}
 
-	if err := store.ReplaceDocumentChunksAndStatus(ctx, documents[0].ID, chunks[:1], DocumentStatusChunked); err != nil {
-		t.Fatalf("replace chunks second time: %v", err)
+	nextChunks := []Chunk{
+		{ChunkIndex: 0, Text: "hello", TokenCount: 2, StartOffset: 0, EndOffset: 5, ContentHash: "hash-1"},
+		{ChunkIndex: 1, Text: "new", TokenCount: 1, StartOffset: 5, EndOffset: 8, ContentHash: "hash-3"},
+	}
+	plan := ReconcileChunks(existing, nextChunks)
+	if len(plan.Keep) != 1 || plan.Keep[0].ID != existing[0].ID {
+		t.Fatalf("kept chunks mismatch: %#v", plan.Keep)
+	}
+	if len(plan.Insert) != 1 || plan.Insert[0].ContentHash != "hash-3" {
+		t.Fatalf("insert chunks mismatch: %#v", plan.Insert)
+	}
+	if len(plan.RemoveIDs) != 1 || plan.RemoveIDs[0] != existing[1].ID {
+		t.Fatalf("removed chunks mismatch: %#v", plan.RemoveIDs)
+	}
+
+	inserted, err = store.ApplyDocumentChunkReconcile(ctx, documents[0].ID, plan)
+	if err != nil {
+		t.Fatalf("apply reconciled chunks: %v", err)
+	}
+	if len(inserted) != 1 || inserted[0].ID == 0 || inserted[0].ContentHash != "hash-3" {
+		t.Fatalf("inserted reconciled chunks mismatch: %#v", inserted)
 	}
 	if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM chunks WHERE document_id = ?", documents[0].ID).Scan(&chunkCount); err != nil {
-		t.Fatalf("count replaced chunks: %v", err)
+		t.Fatalf("count reconciled chunks: %v", err)
 	}
-	if chunkCount != 1 {
-		t.Fatalf("replaced chunk count mismatch: want 1, got %d", chunkCount)
+	if chunkCount != 2 {
+		t.Fatalf("reconciled chunk count mismatch: want 2, got %d", chunkCount)
+	}
+}
+
+func TestReconcileChunksHandlesDuplicateContentHashesByOccurrence(t *testing.T) {
+	existing := []Chunk{
+		{ID: 10, DocumentID: 42, ChunkIndex: 0, ContentHash: "same"},
+		{ID: 11, DocumentID: 42, ChunkIndex: 1, ContentHash: "same"},
+		{ID: 12, DocumentID: 42, ChunkIndex: 2, ContentHash: "removed"},
+	}
+	incoming := []Chunk{
+		{ChunkIndex: 0, ContentHash: "same"},
+		{ChunkIndex: 1, ContentHash: "same"},
+		{ChunkIndex: 2, ContentHash: "new"},
+	}
+
+	plan := ReconcileChunks(existing, incoming)
+
+	if len(plan.Keep) != 2 || plan.Keep[0].ID != 10 || plan.Keep[1].ID != 11 {
+		t.Fatalf("kept duplicate chunks mismatch: %#v", plan.Keep)
+	}
+	if len(plan.Insert) != 1 || plan.Insert[0].ContentHash != "new" {
+		t.Fatalf("insert chunks mismatch: %#v", plan.Insert)
+	}
+	if len(plan.RemoveIDs) != 1 || plan.RemoveIDs[0] != 12 {
+		t.Fatalf("removed chunks mismatch: %#v", plan.RemoveIDs)
 	}
 }
 

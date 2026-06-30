@@ -43,7 +43,7 @@ type Pool []FileStrategy
 
 type Store interface {
 	DocumentsByStatus(ctx context.Context, status string, limit int) ([]storage.Document, error)
-	ReplaceDocumentChunksAndStatus(ctx context.Context, documentID int64, chunks []storage.Chunk, status string) error
+	ApplyDocumentChunkReconcile(ctx context.Context, documentID int64, plan storage.ChunkReconcilePlan) ([]storage.Chunk, error)
 	ChunksByDocumentID(ctx context.Context, documentID int64) ([]storage.Chunk, error)
 	UpdateDocumentStatus(ctx context.Context, fileID string, status string) error
 }
@@ -54,8 +54,8 @@ type VectorStore interface {
 }
 
 type Result struct {
-	Chunked  int
-	Embedded int
+	Processed int
+	Embedded  int
 }
 
 func DefaultPool() Pool {
@@ -134,29 +134,15 @@ func ProcessScannedDocuments(ctx context.Context, store Store, vectorStore Vecto
 		}
 
 		for _, document := range documents {
-			fileStrategy, ok := pool.Find(document.AbsolutePath)
-			if !ok {
-				return result, fmt.Errorf("no strategy for document %q", document.AbsolutePath)
-			}
-
-			chunks, err := fileStrategy.Process(ctx, document)
+			embedded, err := processScannedDocument(ctx, store, vectorStore, pool, document)
 			if err != nil {
-				return result, fmt.Errorf("process document %q: %w", document.AbsolutePath, err)
+				return result, err
 			}
 
-			existingChunks, err := store.ChunksByDocumentID(ctx, document.ID)
-			if err != nil {
-				return result, fmt.Errorf("load existing chunks for %q: %w", document.AbsolutePath, err)
+			if embedded {
+				result.Embedded++
 			}
-			if err := vectorStore.Delete(ctx, chunkIDs(existingChunks)); err != nil {
-				return result, fmt.Errorf("delete old vectors for %q: %w", document.AbsolutePath, err)
-			}
-
-			if err := store.ReplaceDocumentChunksAndStatus(ctx, document.ID, chunks, storage.DocumentStatusChunked); err != nil {
-				return result, fmt.Errorf("store chunks for %q: %w", document.AbsolutePath, err)
-			}
-
-			result.Chunked++
+			result.Processed++
 		}
 	}
 }
@@ -186,56 +172,104 @@ func ProcessChunkedDocuments(ctx context.Context, store Store, vectorStore Vecto
 			if err != nil {
 				return result, fmt.Errorf("load chunks for %q: %w", document.AbsolutePath, err)
 			}
-			if len(chunks) == 0 {
-				if err := store.UpdateDocumentStatus(ctx, document.FileID, storage.DocumentStatusDone); err != nil {
-					return result, fmt.Errorf("mark empty document done %q: %w", document.AbsolutePath, err)
+
+			if len(chunks) > 0 {
+				if err := embedChunks(ctx, vectorStore, fileStrategy.Embedder, document, chunks); err != nil {
+					return result, err
 				}
 				result.Embedded++
-				continue
 			}
 
-			texts := make([]string, len(chunks))
-			for i, chunk := range chunks {
-				texts[i] = chunk.Text
+			if err := store.UpdateDocumentStatus(ctx, document.FileID, storage.DocumentStatusEmbedded); err != nil {
+				return result, fmt.Errorf("mark document embedded %q: %w", document.AbsolutePath, err)
 			}
-
-			vectorValues, err := fileStrategy.Embedder.Embed(ctx, texts)
-			if err != nil {
-				return result, fmt.Errorf("embed chunks for %q: %w", document.AbsolutePath, err)
-			}
-			if len(vectorValues) != len(chunks) {
-				return result, fmt.Errorf("embedding count mismatch for %q: want %d, got %d", document.AbsolutePath, len(chunks), len(vectorValues))
-			}
-
-			dimensions := len(vectorValues[0])
-			embeddings := make([]storage.ChunkEmbedding, len(chunks))
-			for i, chunk := range chunks {
-				if len(vectorValues[i]) != dimensions {
-					return result, fmt.Errorf("embedding dimension mismatch for %q chunk %d", document.AbsolutePath, chunk.ChunkIndex)
-				}
-				embeddings[i] = storage.ChunkEmbedding{ChunkID: chunk.ID, Vector: vectorValues[i]}
-			}
-
-			if err := vectorStore.Replace(ctx, embeddings); err != nil {
-				return result, fmt.Errorf("store vectors for %q: %w", document.AbsolutePath, err)
-			}
-
-			if err := store.UpdateDocumentStatus(ctx, document.FileID, storage.DocumentStatusDone); err != nil {
-				return result, fmt.Errorf("mark document done %q: %w", document.AbsolutePath, err)
-			}
-
-			result.Embedded++
+			result.Processed++
 		}
 	}
 }
 
-func chunkIDs(chunks []storage.Chunk) []int64 {
-	ids := make([]int64, 0, len(chunks))
-	for _, chunk := range chunks {
-		if chunk.ID != 0 {
-			ids = append(ids, chunk.ID)
+func processScannedDocument(ctx context.Context, store Store, vectorStore VectorStore, pool Pool, document storage.Document) (bool, error) {
+	fileStrategy, ok := pool.Find(document.AbsolutePath)
+	if !ok {
+		return false, fmt.Errorf("no strategy for document %q", document.AbsolutePath)
+	}
+
+	chunks, err := fileStrategy.Process(ctx, document)
+	if err != nil {
+		return false, fmt.Errorf("process document %q: %w", document.AbsolutePath, err)
+	}
+
+	existingChunks, err := store.ChunksByDocumentID(ctx, document.ID)
+	if err != nil {
+		return false, fmt.Errorf("load existing chunks for %q: %w", document.AbsolutePath, err)
+	}
+
+	plan := storage.ReconcileChunks(existingChunks, chunks)
+	if err := vectorStore.Delete(ctx, plan.RemoveIDs); err != nil {
+		return false, fmt.Errorf("delete old vectors for %q: %w", document.AbsolutePath, err)
+	}
+
+	insertedChunks, err := store.ApplyDocumentChunkReconcile(ctx, document.ID, plan)
+	if err != nil {
+		return false, fmt.Errorf("reconcile chunks for %q: %w", document.AbsolutePath, err)
+	}
+
+	if err := store.UpdateDocumentStatus(ctx, document.FileID, storage.DocumentStatusChunked); err != nil {
+		return false, fmt.Errorf("mark document chunked %q: %w", document.AbsolutePath, err)
+	}
+
+	chunksToEmbed := insertedChunks
+	if len(plan.Insert) == 0 && len(plan.RemoveIDs) == 0 && len(existingChunks) > 0 {
+		chunksToEmbed, err = store.ChunksByDocumentID(ctx, document.ID)
+		if err != nil {
+			return false, fmt.Errorf("load retry chunks for %q: %w", document.AbsolutePath, err)
 		}
 	}
 
-	return ids
+	embedded := false
+	if len(chunksToEmbed) > 0 {
+		if fileStrategy.Embedder == nil {
+			return false, fmt.Errorf("embedder is required for document %q", document.AbsolutePath)
+		}
+		if err := embedChunks(ctx, vectorStore, fileStrategy.Embedder, document, chunksToEmbed); err != nil {
+			return false, err
+		}
+		embedded = true
+	}
+
+	if err := store.UpdateDocumentStatus(ctx, document.FileID, storage.DocumentStatusEmbedded); err != nil {
+		return false, fmt.Errorf("mark document embedded %q: %w", document.AbsolutePath, err)
+	}
+
+	return embedded, nil
+}
+
+func embedChunks(ctx context.Context, vectorStore VectorStore, embedder Embedder, document storage.Document, chunks []storage.Chunk) error {
+	texts := make([]string, len(chunks))
+	for i, chunk := range chunks {
+		texts[i] = chunk.Text
+	}
+
+	vectorValues, err := embedder.Embed(ctx, texts)
+	if err != nil {
+		return fmt.Errorf("embed chunks for %q: %w", document.AbsolutePath, err)
+	}
+	if len(vectorValues) != len(chunks) {
+		return fmt.Errorf("embedding count mismatch for %q: want %d, got %d", document.AbsolutePath, len(chunks), len(vectorValues))
+	}
+
+	dimensions := len(vectorValues[0])
+	embeddings := make([]storage.ChunkEmbedding, len(chunks))
+	for i, chunk := range chunks {
+		if len(vectorValues[i]) != dimensions {
+			return fmt.Errorf("embedding dimension mismatch for %q chunk %d", document.AbsolutePath, chunk.ChunkIndex)
+		}
+		embeddings[i] = storage.ChunkEmbedding{ChunkID: chunk.ID, Vector: vectorValues[i]}
+	}
+
+	if err := vectorStore.Replace(ctx, embeddings); err != nil {
+		return fmt.Errorf("store vectors for %q: %w", document.AbsolutePath, err)
+	}
+
+	return nil
 }

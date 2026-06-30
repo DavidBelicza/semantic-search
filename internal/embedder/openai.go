@@ -32,9 +32,32 @@ type openAIEmbeddingResponse struct {
 		Index     int       `json:"index"`
 		Embedding []float32 `json:"embedding"`
 	} `json:"data"`
-	Error *struct {
+	Error embeddingError `json:"error,omitempty"`
+}
+
+type embeddingError struct {
+	Message string
+}
+
+func (e *embeddingError) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		return nil
+	}
+
+	var message string
+	if err := json.Unmarshal(data, &message); err == nil {
+		e.Message = message
+		return nil
+	}
+
+	var payload struct {
 		Message string `json:"message"`
-	} `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	e.Message = payload.Message
+	return nil
 }
 
 func NewOpenAIEmbedder(baseURL string, model string) OpenAIEmbedder {
@@ -65,7 +88,7 @@ func (e OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32,
 		return nil, err
 	}
 
-	body, err := json.Marshal(openAIEmbeddingRequest{Model: e.Model, Input: texts})
+	body, err := encodeEmbeddingRequest(openAIEmbeddingRequest{Model: e.Model, Input: texts})
 	if err != nil {
 		return nil, err
 	}
@@ -92,10 +115,11 @@ func (e OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32,
 		return nil, fmt.Errorf("decode embedding response: %w", err)
 	}
 
+	if payload.Error.Message != "" {
+		return nil, fmt.Errorf("embedding request failed: %s", payload.Error.Message)
+	}
+
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		if payload.Error != nil && payload.Error.Message != "" {
-			return nil, fmt.Errorf("embedding request failed: %s", payload.Error.Message)
-		}
 		return nil, fmt.Errorf("embedding request failed with status %d", response.StatusCode)
 	}
 
@@ -114,6 +138,17 @@ func (e OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32,
 	}
 
 	return vectors, nil
+}
+
+func encodeEmbeddingRequest(request openAIEmbeddingRequest) ([]byte, error) {
+	var body bytes.Buffer
+	encoder := json.NewEncoder(&body)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(request); err != nil {
+		return nil, err
+	}
+
+	return body.Bytes(), nil
 }
 
 func embeddingsEndpoint(baseURL string) (string, error) {

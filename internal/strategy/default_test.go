@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -45,7 +46,7 @@ func TestFileStrategyProcessesWithReaderParserAndChunker(t *testing.T) {
 	}
 }
 
-func TestProcessScannedDocumentsStoresChunksAndMarksChunked(t *testing.T) {
+func TestProcessScannedDocumentsReconcilesChunksEmbedsAndMarksEmbedded(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "note.md")
 	if err := os.WriteFile(path, []byte("abcdefg"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
@@ -62,9 +63,10 @@ func TestProcessScannedDocumentsStoresChunksAndMarksChunked(t *testing.T) {
 		},
 		chunks: map[int64][]storage.Chunk{
 			42: {
-				{ID: 99, DocumentID: 42, ChunkIndex: 0, Text: "old"},
+				{ID: 99, DocumentID: 42, ChunkIndex: 0, Text: "old", ContentHash: "old"},
 			},
 		},
+		nextChunkID: 100,
 	}
 	vectorStore := &memoryVectorStore{}
 	pool := Pool{
@@ -82,11 +84,14 @@ func TestProcessScannedDocumentsStoresChunksAndMarksChunked(t *testing.T) {
 		t.Fatalf("process scanned documents: %v", err)
 	}
 
-	if result.Chunked != 1 {
-		t.Fatalf("chunked count mismatch: want 1, got %d", result.Chunked)
+	if result.Processed != 1 {
+		t.Fatalf("processed count mismatch: want 1, got %d", result.Processed)
 	}
-	if store.documents[0].Status != storage.DocumentStatusChunked {
-		t.Fatalf("status mismatch: want chunked, got %q", store.documents[0].Status)
+	if result.Embedded != 1 {
+		t.Fatalf("embedded count mismatch: want 1, got %d", result.Embedded)
+	}
+	if store.documents[0].Status != storage.DocumentStatusEmbedded {
+		t.Fatalf("status mismatch: want embedded, got %q", store.documents[0].Status)
 	}
 	if len(store.chunks[42]) != 3 {
 		t.Fatalf("stored chunk count mismatch: want 3, got %d", len(store.chunks[42]))
@@ -94,9 +99,111 @@ func TestProcessScannedDocumentsStoresChunksAndMarksChunked(t *testing.T) {
 	if len(vectorStore.deleted) != 1 || vectorStore.deleted[0] != 99 {
 		t.Fatalf("deleted vector ids mismatch: %#v", vectorStore.deleted)
 	}
+	if len(vectorStore.embeddings) != 3 {
+		t.Fatalf("embedding count mismatch: want 3, got %d", len(vectorStore.embeddings))
+	}
 }
 
-func TestProcessChunkedDocumentsStoresEmbeddingsAndMarksDone(t *testing.T) {
+func TestProcessScannedDocumentsKeepsUnchangedChunksAndEmbedsNewChunks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "note.md")
+	store := &memoryStrategyStore{
+		documents: []storage.Document{
+			{
+				ID:           42,
+				FileID:       "1:100",
+				AbsolutePath: path,
+				Status:       storage.DocumentStatusScanned,
+			},
+		},
+		chunks: map[int64][]storage.Chunk{
+			42: {
+				{ID: 100, DocumentID: 42, ChunkIndex: 0, Text: "abc", ContentHash: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
+			},
+		},
+		nextChunkID: 101,
+	}
+	vectorStore := &memoryVectorStore{}
+	pool := Pool{
+		{
+			Extensions: []string{".md"},
+			Reader:     fakeReader{text: "abcdef"},
+			Parser:     fakeParser{},
+			Chunker:    chunker.HardLimitChunker{MaxTokens: 3, AverageTokenLength: 1},
+			Embedder:   fakeEmbedder{},
+		},
+	}
+
+	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool)
+	if err != nil {
+		t.Fatalf("process scanned documents: %v", err)
+	}
+
+	if result.Embedded != 1 {
+		t.Fatalf("embedded count mismatch: want 1, got %d", result.Embedded)
+	}
+	if store.documents[0].Status != storage.DocumentStatusEmbedded {
+		t.Fatalf("status mismatch: want embedded, got %q", store.documents[0].Status)
+	}
+	if len(vectorStore.deleted) != 0 {
+		t.Fatalf("expected no deleted vectors, got %#v", vectorStore.deleted)
+	}
+	if len(vectorStore.embeddings) != 1 {
+		t.Fatalf("embedding count mismatch: want 1, got %d", len(vectorStore.embeddings))
+	}
+	if vectorStore.embeddings[0].ChunkID == 100 {
+		t.Fatalf("expected only new chunk to be embedded, got existing chunk id %d", vectorStore.embeddings[0].ChunkID)
+	}
+}
+
+func TestProcessScannedDocumentsEmbedsAllChunksWhenScannedDocumentHasNoChunkChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "note.md")
+	store := &memoryStrategyStore{
+		documents: []storage.Document{
+			{
+				ID:           42,
+				FileID:       "1:100",
+				AbsolutePath: path,
+				Status:       storage.DocumentStatusScanned,
+			},
+		},
+		chunks: map[int64][]storage.Chunk{
+			42: {
+				{ID: 100, DocumentID: 42, ChunkIndex: 0, Text: "abc", ContentHash: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
+				{ID: 101, DocumentID: 42, ChunkIndex: 1, Text: "def", ContentHash: "cb8379ac2098aa165029e3938a51da0bcecfc008fd6795f401178647f96c5b34"},
+			},
+		},
+	}
+	vectorStore := &memoryVectorStore{}
+	pool := Pool{
+		{
+			Extensions: []string{".md"},
+			Reader:     fakeReader{text: "abcdef"},
+			Parser:     fakeParser{},
+			Chunker:    chunker.HardLimitChunker{MaxTokens: 3, AverageTokenLength: 1},
+			Embedder:   fakeEmbedder{},
+		},
+	}
+
+	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool)
+	if err != nil {
+		t.Fatalf("process scanned documents: %v", err)
+	}
+
+	if result.Embedded != 1 {
+		t.Fatalf("embedded count mismatch: want 1, got %d", result.Embedded)
+	}
+	if len(vectorStore.embeddings) != 2 {
+		t.Fatalf("embedding count mismatch: want 2, got %d", len(vectorStore.embeddings))
+	}
+	if vectorStore.embeddings[0].ChunkID != 100 || vectorStore.embeddings[1].ChunkID != 101 {
+		t.Fatalf("embedded chunk ids mismatch: %#v", vectorStore.embeddings)
+	}
+	if store.documents[0].Status != storage.DocumentStatusEmbedded {
+		t.Fatalf("status mismatch: want embedded, got %q", store.documents[0].Status)
+	}
+}
+
+func TestProcessChunkedDocumentsEmbedsAndMarksEmbedded(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "note.md")
 	store := &memoryStrategyStore{
 		documents: []storage.Document{
@@ -109,8 +216,8 @@ func TestProcessChunkedDocumentsStoresEmbeddingsAndMarksDone(t *testing.T) {
 		},
 		chunks: map[int64][]storage.Chunk{
 			42: {
-				{ID: 100, DocumentID: 42, ChunkIndex: 0, Text: "hello"},
-				{ID: 101, DocumentID: 42, ChunkIndex: 1, Text: "world"},
+				{ID: 100, DocumentID: 42, ChunkIndex: 0, Text: "abc", ContentHash: "hash-1"},
+				{ID: 101, DocumentID: 42, ChunkIndex: 1, Text: "def", ContentHash: "hash-2"},
 			},
 		},
 	}
@@ -118,9 +225,6 @@ func TestProcessChunkedDocumentsStoresEmbeddingsAndMarksDone(t *testing.T) {
 	pool := Pool{
 		{
 			Extensions: []string{".md"},
-			Reader:     fakeReader{},
-			Parser:     fakeParser{},
-			Chunker:    chunker.HardLimitChunker{MaxTokens: 3, AverageTokenLength: 1},
 			Embedder:   fakeEmbedder{},
 		},
 	}
@@ -130,14 +234,49 @@ func TestProcessChunkedDocumentsStoresEmbeddingsAndMarksDone(t *testing.T) {
 		t.Fatalf("process chunked documents: %v", err)
 	}
 
-	if result.Embedded != 1 {
-		t.Fatalf("embedded count mismatch: want 1, got %d", result.Embedded)
-	}
-	if store.documents[0].Status != storage.DocumentStatusDone {
-		t.Fatalf("status mismatch: want done, got %q", store.documents[0].Status)
+	if result.Processed != 1 || result.Embedded != 1 {
+		t.Fatalf("result mismatch: %#v", result)
 	}
 	if len(vectorStore.embeddings) != 2 {
 		t.Fatalf("embedding count mismatch: want 2, got %d", len(vectorStore.embeddings))
+	}
+	if store.documents[0].Status != storage.DocumentStatusEmbedded {
+		t.Fatalf("status mismatch: want embedded, got %q", store.documents[0].Status)
+	}
+}
+
+func TestProcessScannedDocumentsLeavesDocumentChunkedWhenEmbeddingFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "note.md")
+	store := &memoryStrategyStore{
+		documents: []storage.Document{
+			{
+				ID:           42,
+				FileID:       "1:100",
+				AbsolutePath: path,
+				Status:       storage.DocumentStatusScanned,
+			},
+		},
+		nextChunkID: 100,
+	}
+	pool := Pool{
+		{
+			Extensions: []string{".md"},
+			Reader:     fakeReader{text: "abc"},
+			Parser:     fakeParser{},
+			Chunker:    chunker.HardLimitChunker{MaxTokens: 3, AverageTokenLength: 1},
+			Embedder:   fakeFailingEmbedder{},
+		},
+	}
+
+	_, err := ProcessScannedDocuments(context.Background(), store, &memoryVectorStore{}, pool)
+	if err == nil {
+		t.Fatal("expected embedding error")
+	}
+	if store.documents[0].Status != storage.DocumentStatusChunked {
+		t.Fatalf("status mismatch: want chunked, got %q", store.documents[0].Status)
+	}
+	if len(store.chunks[42]) != 1 {
+		t.Fatalf("stored chunk count mismatch: want 1, got %d", len(store.chunks[42]))
 	}
 }
 
@@ -165,9 +304,16 @@ func (e fakeEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, e
 	return vectors, nil
 }
 
+type fakeFailingEmbedder struct{}
+
+func (e fakeFailingEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	return nil, errors.New("embedding failed")
+}
+
 type memoryStrategyStore struct {
-	documents []storage.Document
-	chunks    map[int64][]storage.Chunk
+	documents   []storage.Document
+	chunks      map[int64][]storage.Chunk
+	nextChunkID int64
 }
 
 func (s *memoryStrategyStore) DocumentsByStatus(ctx context.Context, status string, limit int) ([]storage.Document, error) {
@@ -184,19 +330,47 @@ func (s *memoryStrategyStore) DocumentsByStatus(ctx context.Context, status stri
 	return documents, nil
 }
 
-func (s *memoryStrategyStore) ReplaceDocumentChunksAndStatus(ctx context.Context, documentID int64, chunks []storage.Chunk, status string) error {
+func (s *memoryStrategyStore) ApplyDocumentChunkReconcile(ctx context.Context, documentID int64, plan storage.ChunkReconcilePlan) ([]storage.Chunk, error) {
 	if s.chunks == nil {
 		s.chunks = map[int64][]storage.Chunk{}
 	}
-	s.chunks[documentID] = chunks
 
-	for i := range s.documents {
-		if s.documents[i].ID == documentID {
-			s.documents[i].Status = status
+	removed := map[int64]struct{}{}
+	for _, chunkID := range plan.RemoveIDs {
+		removed[chunkID] = struct{}{}
+	}
+
+	current := s.chunks[documentID]
+	var kept []storage.Chunk
+	for _, chunk := range current {
+		if _, ok := removed[chunk.ID]; !ok {
+			kept = append(kept, chunk)
 		}
 	}
 
-	return nil
+	for _, chunk := range plan.Keep {
+		for i := range kept {
+			if kept[i].ID == chunk.ID {
+				kept[i] = chunk
+				break
+			}
+		}
+	}
+
+	inserted := make([]storage.Chunk, len(plan.Insert))
+	for i, chunk := range plan.Insert {
+		if s.nextChunkID == 0 {
+			s.nextChunkID = 1
+		}
+		chunk.ID = s.nextChunkID
+		chunk.DocumentID = documentID
+		s.nextChunkID++
+		inserted[i] = chunk
+		kept = append(kept, chunk)
+	}
+
+	s.chunks[documentID] = kept
+	return inserted, nil
 }
 
 func (s *memoryStrategyStore) ChunksByDocumentID(ctx context.Context, documentID int64) ([]storage.Chunk, error) {

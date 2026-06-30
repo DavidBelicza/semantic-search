@@ -20,7 +20,6 @@ type Store interface {
 }
 
 type Result struct {
-	Done    int
 	Scanned int
 }
 
@@ -42,10 +41,7 @@ func ScanIndexedDocuments(ctx context.Context, store Store) (Result, error) {
 				return result, err
 			}
 
-			switch status {
-			case storage.DocumentStatusDone:
-				result.Done++
-			case storage.DocumentStatusScanned:
+			if status == storage.DocumentStatusScanned {
 				result.Scanned++
 			}
 		}
@@ -56,11 +52,11 @@ func scanDocument(ctx context.Context, store Store, document storage.Document) (
 	if document.HasHash && document.HasScannedMetadata &&
 		document.FileSize == document.ScannedFileSize &&
 		document.ModifiedAtNS == document.ScannedModifiedAtNS {
-		if err := store.UpdateDocumentScanCheckpointAndStatus(ctx, document.FileID, storage.DocumentStatusDone); err != nil {
-			return "", fmt.Errorf("mark unchanged document done %q: %w", document.AbsolutePath, err)
+		if err := store.UpdateDocumentScanCheckpointAndStatus(ctx, document.FileID, storage.DocumentStatusScanned); err != nil {
+			return "", fmt.Errorf("mark unchanged document scanned %q: %w", document.AbsolutePath, err)
 		}
 
-		return storage.DocumentStatusDone, nil
+		return storage.DocumentStatusScanned, nil
 	}
 
 	contentHash, err := HashFile(document.AbsolutePath)
@@ -69,11 +65,11 @@ func scanDocument(ctx context.Context, store Store, document storage.Document) (
 	}
 
 	if document.HasHash && document.ContentHash == contentHash {
-		if err := store.UpdateDocumentScanCheckpointAndStatus(ctx, document.FileID, storage.DocumentStatusDone); err != nil {
-			return "", fmt.Errorf("mark same-hash document done %q: %w", document.AbsolutePath, err)
+		if err := store.UpdateDocumentScanCheckpointAndStatus(ctx, document.FileID, storage.DocumentStatusScanned); err != nil {
+			return "", fmt.Errorf("mark same-hash document scanned %q: %w", document.AbsolutePath, err)
 		}
 
-		return storage.DocumentStatusDone, nil
+		return storage.DocumentStatusScanned, nil
 	}
 
 	if err := store.UpdateDocumentContentHashAndStatus(ctx, document.FileID, contentHash, storage.DocumentStatusScanned); err != nil {

@@ -273,7 +273,7 @@ CREATE TABLE IF NOT EXISTS documents (
     scanned_file_size INTEGER,
     scanned_modified_at_ns INTEGER,
     status TEXT NOT NULL DEFAULT 'indexed'
-        CHECK(status IN ('indexed', 'scanned', 'chunked', 'embedded', 'done', 'failed')),
+        CHECK(status IN ('indexed', 'scanned', 'chunked', 'embedded')),
     title TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -691,13 +691,11 @@ indexed
 scanned
 chunked
 embedded
-done
-failed
 ```
 
-The CLI `index` command orchestrates the internal stages in order. The index stage crawls and stores filesystem metadata, then marks records as `indexed`. The scan stage reads `indexed` records one by one, compares current metadata with the previous scan checkpoint, hashes files when metadata differs, stores changed content hashes, and advances records to `scanned` or `done`. The chunking stage reads `scanned` records one by one, replaces their chunk rows, and advances them to `chunked`. The embedding stage reads `chunked` records one by one, stores chunk embeddings, and advances completed documents to `done`.
+The CLI `index` command orchestrates the internal stages in order. The index stage crawls supported files and stores filesystem metadata, inserting new records as `indexed` and preserving the current status when metadata is unchanged. If file size or modification time changes, the document moves back to `indexed` for scan. The scan stage reads `indexed` records one by one, refreshes the content hash and scan checkpoint, and advances records to `scanned`. The processing stage reads `scanned` records one by one, chunks the content, reconciles chunk rows by content hash occurrence, deletes removed chunk vectors before deleting removed chunk rows, and marks the document `chunked`. The embedding stage reads `chunked` records, writes vectors to LanceDB, and only after vector storage succeeds advances the document to `embedded`. If embedding fails, the document remains `chunked` and can be retried by a later run.
 
-Search must only include documents that have completed the required downstream stages.
+Search must only include `embedded` documents.
 
 ### 12.3 Missing files
 
@@ -994,8 +992,8 @@ delete
 
 When a batch fails permanently:
 
-- Mark every affected document as failed.
-- Do not publish partial chunks for that document.
+- Leave every affected document as `chunked`.
+- Do not advance the document to `embedded`.
 - Continue with unrelated documents unless fail-fast mode is active.
 
 ### Database failures

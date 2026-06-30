@@ -100,12 +100,12 @@ func TestNewIndexCommandStoresMetadataAndScansContent(t *testing.T) {
 		t.Fatalf("document count mismatch: want 3, got %d", count)
 	}
 
-	var doneCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM documents WHERE content_hash IS NOT NULL AND status = ?", storage.DocumentStatusDone).Scan(&doneCount); err != nil {
-		t.Fatalf("count done documents: %v", err)
+	var embeddedCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM documents WHERE content_hash IS NOT NULL AND status = ?", storage.DocumentStatusEmbedded).Scan(&embeddedCount); err != nil {
+		t.Fatalf("count embedded documents: %v", err)
 	}
-	if doneCount != 3 {
-		t.Fatalf("done document count mismatch: want 3, got %d", doneCount)
+	if embeddedCount != 3 {
+		t.Fatalf("embedded document count mismatch: want 3, got %d", embeddedCount)
 	}
 
 	var chunkCount int
@@ -143,8 +143,8 @@ func (s *fakeDocumentStore) UpdateDocumentStatus(ctx context.Context, fileID str
 	return nil
 }
 
-func (s *fakeDocumentStore) ReplaceDocumentChunksAndStatus(ctx context.Context, documentID int64, chunks []storage.Chunk, status string) error {
-	return nil
+func (s *fakeDocumentStore) ApplyDocumentChunkReconcile(ctx context.Context, documentID int64, plan storage.ChunkReconcilePlan) ([]storage.Chunk, error) {
+	return plan.Insert, nil
 }
 
 func (s *fakeDocumentStore) ChunksByDocumentID(ctx context.Context, documentID int64) ([]storage.Chunk, error) {

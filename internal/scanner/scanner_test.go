@@ -26,7 +26,7 @@ func TestHashFileReturnsSHA256Hex(t *testing.T) {
 	}
 }
 
-func TestScanIndexedDocumentsMarksSameMetadataDoneWithoutHashing(t *testing.T) {
+func TestScanIndexedDocumentsMarksSameMetadataScannedWithoutHashing(t *testing.T) {
 	store := &memoryScanStore{
 		documents: []storage.Document{
 			{
@@ -49,11 +49,11 @@ func TestScanIndexedDocumentsMarksSameMetadataDoneWithoutHashing(t *testing.T) {
 		t.Fatalf("scan indexed documents: %v", err)
 	}
 
-	if result.Done != 1 || result.Scanned != 0 {
+	if result.Scanned != 1 {
 		t.Fatalf("result mismatch: %#v", result)
 	}
-	if store.documents[0].Status != storage.DocumentStatusDone {
-		t.Fatalf("status mismatch: want done, got %q", store.documents[0].Status)
+	if store.documents[0].Status != storage.DocumentStatusScanned {
+		t.Fatalf("status mismatch: want scanned, got %q", store.documents[0].Status)
 	}
 }
 
@@ -82,7 +82,7 @@ func TestScanIndexedDocumentsHashesAndMarksScannedWhenContentChanged(t *testing.
 		t.Fatalf("scan indexed documents: %v", err)
 	}
 
-	if result.Done != 0 || result.Scanned != 1 {
+	if result.Scanned != 1 {
 		t.Fatalf("result mismatch: %#v", result)
 	}
 	if store.documents[0].Status != storage.DocumentStatusScanned {
