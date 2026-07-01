@@ -15,7 +15,7 @@ import (
 	"semantic-search/internal/crawler"
 	"semantic-search/internal/parser"
 	"semantic-search/internal/reader"
-	"semantic-search/internal/storage/lancedb"
+	"semantic-search/internal/storage/sqlitevec"
 	storage "semantic-search/internal/storage/sqlite"
 	"semantic-search/internal/strategy"
 )
@@ -175,7 +175,7 @@ func (s *fakeVectorStore) Replace(ctx context.Context, embeddings []storage.Chun
 	return nil
 }
 
-func (s *fakeVectorStore) Search(ctx context.Context, query []float32, limit int) ([]lancedb.VectorHit, error) {
+func (s *fakeVectorStore) Search(ctx context.Context, query []float32, limit int) ([]sqlitevec.VectorHit, error) {
 	return nil, nil
 }
 

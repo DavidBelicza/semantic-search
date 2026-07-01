@@ -62,36 +62,3 @@ func TestDatabasePathFromArgs(t *testing.T) {
 		})
 	}
 }
-
-func TestVectorDatabasePath(t *testing.T) {
-	tests := []struct {
-		name string
-		path string
-		want string
-	}{
-		{
-			name: "sqlite extension",
-			path: "index.db",
-			want: "index.lancedb",
-		},
-		{
-			name: "path with directory",
-			path: filepath.Join("data", "index.sqlite"),
-			want: filepath.Join("data", "index.lancedb"),
-		},
-		{
-			name: "no extension",
-			path: "index",
-			want: "index.lancedb",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := VectorDatabasePath(tt.path)
-			if got != tt.want {
-				t.Fatalf("vector database path mismatch: want %q, got %q", tt.want, got)
-			}
-		})
-	}
-}

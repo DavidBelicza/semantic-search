@@ -1,10 +1,7 @@
-.PHONY: install-lancedb test lint
+.PHONY: test lint
 
-install-lancedb:
-	./scripts/install_lancedb.sh
-
-test: install-lancedb
+test:
 	go test ./...
 
-lint: install-lancedb
+lint:
 	golangci-lint run ./...

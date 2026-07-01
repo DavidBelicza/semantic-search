@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"semantic-search/internal/storage/lancedb"
 	storage "semantic-search/internal/storage/sqlite"
+	"semantic-search/internal/storage/sqlitevec"
 )
 
 // SearchResult is one chunk match: the document it belongs to, the chunk id, the
@@ -25,7 +25,7 @@ type SearchMetadataStore interface {
 }
 
 type SearchVectorStore interface {
-	Search(ctx context.Context, query []float32, limit int) ([]lancedb.VectorHit, error)
+	Search(ctx context.Context, query []float32, limit int) ([]sqlitevec.VectorHit, error)
 }
 
 // VectorStore is the full vector-store surface used across the commands: chunk
@@ -74,7 +74,7 @@ func Search(ctx context.Context, store SearchMetadataStore, vectorStore SearchVe
 	return buildSearchResults(hits, metadata), nil
 }
 
-func hitChunkIDs(hits []lancedb.VectorHit) []int64 {
+func hitChunkIDs(hits []sqlitevec.VectorHit) []int64 {
 	ids := make([]int64, len(hits))
 	for i, hit := range hits {
 		ids[i] = hit.ChunkID
@@ -83,7 +83,7 @@ func hitChunkIDs(hits []lancedb.VectorHit) []int64 {
 	return ids
 }
 
-func buildSearchResults(hits []lancedb.VectorHit, metadata []storage.ChunkMetadata) []SearchResult {
+func buildSearchResults(hits []sqlitevec.VectorHit, metadata []storage.ChunkMetadata) []SearchResult {
 	byID := make(map[int64]storage.ChunkMetadata, len(metadata))
 	for _, item := range metadata {
 		byID[item.ChunkID] = item

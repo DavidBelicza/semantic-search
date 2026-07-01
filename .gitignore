@@ -1,6 +1,4 @@
 .DS_Store
 *.db
-*.lancedb/
 .tmp/
-native/
 .vscode/

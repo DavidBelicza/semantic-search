@@ -9,6 +9,7 @@ Guidance for Claude Code when working in this repository.
   [docs/improvements.md](docs/improvements.md)
 - Chunking design (implemented): [docs/chunking-design.md](docs/chunking-design.md)
 - Scaling/throughput research: [docs/research-vector-search-scaling.md](docs/research-vector-search-scaling.md)
+- sqlite-vec migration (implemented; replaced LanceDB): [docs/research-sqlite-vec-migration.md](docs/research-sqlite-vec-migration.md)
 
 ## Code style: prefer a flat structure
 
@@ -40,10 +41,10 @@ Enforcement:
 
 ## Build, test, lint
 
-- Build: `go build ./...`
-- Test: `make test` (installs the LanceDB native lib first, then `go test ./...`)
-- Lint: `make lint` (requires the `golangci-lint` binary; also installs the native
-  lib because the `lancedb` package links it via cgo)
+- Build: `go build ./...` (cgo; needs a C compiler — `mattn/go-sqlite3` and the
+  `sqlite-vec` bindings compile from source)
+- Test: `make test` (`go test ./...`)
+- Lint: `make lint` (requires the `golangci-lint` binary)
 
 ## Skills
 

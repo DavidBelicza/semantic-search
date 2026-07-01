@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"semantic-search/internal/storage/lancedb"
+	"semantic-search/internal/storage/sqlitevec"
 	storage "semantic-search/internal/storage/sqlite"
 )
 
@@ -43,7 +43,7 @@ func TestNewSearchCommandReturnsDocumentChunkAndText(t *testing.T) {
 		},
 	}
 	vectorStore := &searchVectorStub{
-		hits: []lancedb.VectorHit{{ChunkID: 7, Distance: 0.1}},
+		hits: []sqlitevec.VectorHit{{ChunkID: 7, Distance: 0.1}},
 	}
 
 	searchCmd := NewSearchCommandWithEmbedder(&out, store, vectorStore, stubQueryEmbedder{vector: []float32{0.1, 0.2}})
@@ -83,11 +83,11 @@ func (s *searchMetadataStub) ChunkMetadataByIDs(ctx context.Context, chunkIDs []
 }
 
 type searchVectorStub struct {
-	hits     []lancedb.VectorHit
+	hits     []sqlitevec.VectorHit
 	gotLimit int
 }
 
-func (s *searchVectorStub) Search(ctx context.Context, query []float32, limit int) ([]lancedb.VectorHit, error) {
+func (s *searchVectorStub) Search(ctx context.Context, query []float32, limit int) ([]sqlitevec.VectorHit, error) {
 	s.gotLimit = limit
 	return s.hits, nil
 }

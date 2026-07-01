@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"io"
-	"path/filepath"
 	"strings"
 
 	"semantic-search/cmd"
 	"semantic-search/internal/embedder"
-	"semantic-search/internal/storage/lancedb"
 	storage "semantic-search/internal/storage/sqlite"
+	"semantic-search/internal/storage/sqlitevec"
 )
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) error {
@@ -29,7 +28,7 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) error {
 		return err
 	}
 
-	vectorStore, err := lancedb.Open(context.Background(), VectorDatabasePath(databasePath), embedder.DefaultDimensions)
+	vectorStore, err := sqlitevec.Open(context.Background(), databasePath, embedder.DefaultDimensions)
 	if err != nil {
 		return err
 	}
@@ -63,13 +62,4 @@ func DatabasePathFromArgs(args []string) (string, error) {
 	}
 
 	return cmd.DefaultDatabasePath, nil
-}
-
-func VectorDatabasePath(databasePath string) string {
-	extension := filepath.Ext(databasePath)
-	if extension == "" {
-		return databasePath + ".lancedb"
-	}
-
-	return strings.TrimSuffix(databasePath, extension) + ".lancedb"
 }
