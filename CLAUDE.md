@@ -7,6 +7,8 @@ Guidance for Claude Code when working in this repository.
 - Design spec: [docs/go-vector-indexer-implementation.md](docs/go-vector-indexer-implementation.md)
 - Improvements backlog (the work to do, with a "Deferred — not now" section):
   [docs/improvements.md](docs/improvements.md)
+- Chunking design (implemented): [docs/chunking-design.md](docs/chunking-design.md)
+- Scaling/throughput research: [docs/research-vector-search-scaling.md](docs/research-vector-search-scaling.md)
 
 ## Code style: prefer a flat structure
 

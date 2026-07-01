@@ -58,6 +58,9 @@ func writeSearchResults(out io.Writer, results []semanticsearch.SearchResult) {
 
 	for i, result := range results {
 		fmt.Fprintf(out, "%d. document_id=%d chunk_id=%d score=%.4f\n", i+1, result.DocumentID, result.ChunkID, result.Score)
+		if result.Title != "" {
+			fmt.Fprintf(out, "   [%s]\n", result.Title)
+		}
 		fmt.Fprintf(out, "   %s\n", result.Text)
 	}
 }

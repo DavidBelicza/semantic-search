@@ -125,12 +125,20 @@ VALUES ('1:100', '/tmp/docs/README.md', 10, 100, 'hash', 10, 100, 'scanned')`); 
 		t.Fatalf("ensure schema: %v", err)
 	}
 
-	exists, err := store.documentsColumnExists(ctx, "embedded_content_hash")
+	exists, err := store.tableColumnExists(ctx, "documents", "embedded_content_hash")
 	if err != nil {
 		t.Fatalf("check column: %v", err)
 	}
 	if !exists {
 		t.Fatal("expected embedded_content_hash column to be added to legacy database")
+	}
+
+	chunkTitleExists, err := store.tableColumnExists(ctx, "chunks", "title")
+	if err != nil {
+		t.Fatalf("check chunk title column: %v", err)
+	}
+	if !chunkTitleExists {
+		t.Fatal("expected chunks.title column to be present")
 	}
 
 	if err := store.MarkDocumentEmbedded(ctx, "1:100", "content-hash"); err != nil {

@@ -39,7 +39,7 @@ func TestNewSearchCommandReturnsDocumentChunkAndText(t *testing.T) {
 	var out bytes.Buffer
 	store := &searchMetadataStub{
 		metadata: []storage.ChunkMetadata{
-			{ChunkID: 7, DocumentID: 42, Text: "payment provider configuration"},
+			{ChunkID: 7, DocumentID: 42, Title: "Payments > Providers", Text: "payment provider configuration"},
 		},
 	}
 	vectorStore := &searchVectorStub{
@@ -54,7 +54,7 @@ func TestNewSearchCommandReturnsDocumentChunkAndText(t *testing.T) {
 	}
 
 	output := out.String()
-	for _, want := range []string{"document_id=42", "chunk_id=7", "score=0.1000", "payment provider configuration"} {
+	for _, want := range []string{"document_id=42", "chunk_id=7", "score=0.1000", "[Payments > Providers]", "payment provider configuration"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("search output missing %q: %q", want, output)
 		}

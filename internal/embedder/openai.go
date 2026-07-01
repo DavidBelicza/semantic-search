@@ -22,11 +22,24 @@ const (
 	DefaultBackoffMax     = 5 * time.Second
 
 	// EmbeddingGemma requires prompt templates: indexed passages use
-	// "title: none | text:" and queries use "task: search result | query:".
-	// Omitting them badly degrades ranking (junk can outrank relevant chunks).
-	DocumentPrefix = "title: none | text: "
-	QueryPrefix    = "task: search result | query: "
+	// "title: <title> | text: <content>" and queries use
+	// "task: search result | query: <query>". Omitting them badly degrades ranking
+	// (junk can outrank relevant chunks). Documents are formatted per-chunk by
+	// DocumentInput; queries use QueryPrefix.
+	QueryPrefix = "task: search result | query: "
 )
+
+// DocumentInput formats a chunk for indexing using EmbeddingGemma's document template.
+// The title carries the chunk's heading path (or note name); an empty title becomes
+// "none", the model's documented placeholder.
+func DocumentInput(title string, text string) string {
+	label := strings.TrimSpace(title)
+	if label == "" {
+		label = "none"
+	}
+
+	return "title: " + label + " | text: " + text
+}
 
 type OpenAIEmbedder struct {
 	BaseURL     string

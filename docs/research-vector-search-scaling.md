@@ -45,8 +45,11 @@ distinct performance concerns, which scale independently:
 ```
 
 ### Chunk size
-The hard-limit chunker cuts at `maxTokens × avgTokenLength = 300 × 4 = 1,200`
-characters per chunk, with **no overlap** currently.
+The structure-aware Markdown chunker targets `DefaultMarkdownMaxTokens = 350` tokens,
+cutting on heading/paragraph/sentence boundaries with ~50-token overlap — roughly
+`350 × 4 ≈ 1,400` characters per full chunk (see
+[chunking-design.md](chunking-design.md)). Heading-based sectioning can add chunks for
+documents with many headings.
 
 ### Chunks per book (500-page novel)
 Assumptions: ~250–300 words/page, ~6 chars/word (incl. spaces).
@@ -54,10 +57,11 @@ Assumptions: ~250–300 words/page, ~6 chars/word (incl. spaces).
 ```
 500 pages × ~275 words      ≈ 137,500 words
 137,500 words × ~6 chars    ≈ 825,000 characters
-825,000 / 1,200 chars/chunk ≈ ~690 chunks
+825,000 / 1,400 chars/chunk ≈ ~590 chunks (before heading splits/overlap)
 ```
-→ **~700 chunks per 500-page book** (working figure). Real books vary widely:
-Harry Potter book 1 (~77K words) ≈ ~400 chunks; book 5 (~257K words) ≈ ~1,300 chunks.
+→ **~600–700 chunks per 500-page book** (working figure; ~700 used in the tables below
+as a round number). Real books vary widely: Harry Potter book 1 (~77K words) ≈ ~350
+chunks; book 5 (~257K words) ≈ ~1,150 chunks.
 
 ### Storage per book
 ```

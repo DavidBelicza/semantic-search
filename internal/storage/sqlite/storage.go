@@ -43,6 +43,7 @@ type Chunk struct {
 	ID          int64
 	DocumentID  int64
 	ChunkIndex  int
+	Title       string
 	Text        string
 	TokenCount  int
 	StartOffset int
@@ -89,12 +90,15 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 	if err := s.ensureDocumentStatusSchema(ctx); err != nil {
 		return err
 	}
+	if err := s.ensureEmbeddedContentHashColumn(ctx); err != nil {
+		return err
+	}
 
-	return s.ensureEmbeddedContentHashColumn(ctx)
+	return s.ensureChunkTitleColumn(ctx)
 }
 
 func (s *Store) ensureEmbeddedContentHashColumn(ctx context.Context) error {
-	exists, err := s.documentsColumnExists(ctx, "embedded_content_hash")
+	exists, err := s.tableColumnExists(ctx, "documents", "embedded_content_hash")
 	if err != nil {
 		return err
 	}
@@ -106,8 +110,21 @@ func (s *Store) ensureEmbeddedContentHashColumn(ctx context.Context) error {
 	return err
 }
 
-func (s *Store) documentsColumnExists(ctx context.Context, column string) (bool, error) {
-	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info(documents)")
+func (s *Store) ensureChunkTitleColumn(ctx context.Context) error {
+	exists, err := s.tableColumnExists(ctx, "chunks", "title")
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+
+	_, err = s.db.ExecContext(ctx, "ALTER TABLE chunks ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+	return err
+}
+
+func (s *Store) tableColumnExists(ctx context.Context, table string, column string) (bool, error) {
+	rows, err := s.db.QueryContext(ctx, "PRAGMA table_info("+table+")")
 	if err != nil {
 		return false, err
 	}
@@ -457,6 +474,7 @@ func (s *Store) ApplyDocumentChunkReconcile(ctx context.Context, documentID int6
 UPDATE chunks
 SET
 	chunk_index = ?,
+	title = ?,
 	text = ?,
 	token_count = ?,
 	start_offset = ?,
@@ -480,6 +498,7 @@ WHERE id = ? AND document_id = ?`)
 		if _, err := updateStmt.ExecContext(
 			ctx,
 			chunk.ChunkIndex,
+			chunk.Title,
 			chunk.Text,
 			chunk.TokenCount,
 			chunk.StartOffset,
@@ -496,12 +515,13 @@ WHERE id = ? AND document_id = ?`)
 INSERT INTO chunks (
 	document_id,
 	chunk_index,
+	title,
 	text,
 	token_count,
 	start_offset,
 	end_offset,
 	content_hash
-) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return nil, err
 	}
@@ -513,6 +533,7 @@ INSERT INTO chunks (
 			ctx,
 			documentID,
 			chunk.ChunkIndex,
+			chunk.Title,
 			chunk.Text,
 			chunk.TokenCount,
 			chunk.StartOffset,
@@ -542,6 +563,7 @@ INSERT INTO chunks (
 type ChunkMetadata struct {
 	ChunkID    int64
 	DocumentID int64
+	Title      string
 	Text       string
 }
 
@@ -560,7 +582,7 @@ func (s *Store) ChunkMetadataByIDs(ctx context.Context, chunkIDs []int64) ([]Chu
 	var metadata []ChunkMetadata
 	for rows.Next() {
 		var item ChunkMetadata
-		if err := rows.Scan(&item.ChunkID, &item.DocumentID, &item.Text); err != nil {
+		if err := rows.Scan(&item.ChunkID, &item.DocumentID, &item.Title, &item.Text); err != nil {
 			return nil, err
 		}
 		metadata = append(metadata, item)
@@ -580,12 +602,12 @@ func chunkMetadataQuery(chunkIDs []int64) (string, []any) {
 		args[i] = chunkID
 	}
 
-	return "SELECT id, document_id, text FROM chunks WHERE id IN (" + strings.Join(placeholders, ", ") + ")", args
+	return "SELECT id, document_id, title, text FROM chunks WHERE id IN (" + strings.Join(placeholders, ", ") + ")", args
 }
 
 func (s *Store) ChunksByDocumentID(ctx context.Context, documentID int64) ([]Chunk, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, document_id, chunk_index, text, token_count, start_offset, end_offset, content_hash
+SELECT id, document_id, chunk_index, title, text, token_count, start_offset, end_offset, content_hash
 FROM chunks
 WHERE document_id = ?
 ORDER BY chunk_index`, documentID)
@@ -601,6 +623,7 @@ ORDER BY chunk_index`, documentID)
 			&chunk.ID,
 			&chunk.DocumentID,
 			&chunk.ChunkIndex,
+			&chunk.Title,
 			&chunk.Text,
 			&chunk.TokenCount,
 			&chunk.StartOffset,

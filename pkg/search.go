@@ -15,6 +15,7 @@ import (
 type SearchResult struct {
 	DocumentID int64
 	ChunkID    int64
+	Title      string
 	Text       string
 	Score      float64
 }
@@ -97,6 +98,7 @@ func buildSearchResults(hits []lancedb.VectorHit, metadata []storage.ChunkMetada
 		results = append(results, SearchResult{
 			DocumentID: item.DocumentID,
 			ChunkID:    item.ChunkID,
+			Title:      item.Title,
 			Text:       item.Text,
 			Score:      hit.Distance,
 		})

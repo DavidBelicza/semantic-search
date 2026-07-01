@@ -63,13 +63,12 @@ type Result struct {
 func DefaultPool() Pool {
 	openAIEmbedder := embedder.NewOpenAIEmbedder(embedder.DefaultBaseURL, embedder.DefaultModel)
 	openAIEmbedder.Dimensions = embedder.DefaultDimensions
-	openAIEmbedder.Prefix = embedder.DocumentPrefix
 	return Pool{
 		{
 			Extensions: []string{".md", ".markdown", ".mdown"},
 			Reader:     reader.MarkdownReader{},
 			Parser:     parser.MarkdownParser{},
-			Chunker:    chunker.NewHardLimitChunker(chunker.DefaultMaxTokens),
+			Chunker:    chunker.NewMarkdownChunker(chunker.DefaultMarkdownMaxTokens, chunker.DefaultOverlapTokens),
 			Embedder:   openAIEmbedder,
 		},
 	}
@@ -308,13 +307,13 @@ func embedIfNeeded(ctx context.Context, vectorStore VectorStore, fileStrategy Fi
 	return true, nil
 }
 
-func embedChunks(ctx context.Context, vectorStore VectorStore, embedder Embedder, document storage.Document, chunks []storage.Chunk) error {
+func embedChunks(ctx context.Context, vectorStore VectorStore, client Embedder, document storage.Document, chunks []storage.Chunk) error {
 	texts := make([]string, len(chunks))
 	for i, chunk := range chunks {
-		texts[i] = chunk.Text
+		texts[i] = embedder.DocumentInput(chunk.Title, chunk.Text)
 	}
 
-	vectorValues, err := embedder.Embed(ctx, texts)
+	vectorValues, err := client.Embed(ctx, texts)
 	if err != nil {
 		return fmt.Errorf("embed chunks for %q: %w", document.AbsolutePath, err)
 	}

@@ -7,6 +7,7 @@ require (
 	github.com/lancedb/lancedb-go v0.1.2
 	github.com/mattn/go-sqlite3 v1.14.47
 	github.com/spf13/cobra v1.10.2
+	github.com/yuin/goldmark v1.8.2
 )
 
 require (

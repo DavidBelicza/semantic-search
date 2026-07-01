@@ -2,8 +2,7 @@
 
 Issues found in the current implementation, to be worked through. The
 **Deferred — intentionally not now** section below lists what is intentionally left
-alone for this round (chunking, parser normalization, batching); everything else is
-fair game.
+alone for this round; everything else is fair game.
 
 The canonical design reference is
 [go-vector-indexer-implementation.md](go-vector-indexer-implementation.md); section
@@ -12,34 +11,36 @@ numbers below (§) refer to it. Project guidance lives in
 
 ---
 
+## Done since the initial backlog
+
+- **Structure-aware chunking — ✅ done.** The hard-cut placeholder was replaced with a
+  goldmark-based Markdown chunker (heading sections, ~350-token budget, overlap,
+  heading-path/note-name titles, oversized-block splitting). See
+  [chunking-design.md](chunking-design.md). `HardLimitChunker` remains for tests.
+- **Parser normalization — ✅ done.** `MarkdownParser`
+  ([internal/parser/markdown.go](../internal/parser/markdown.go)) now strips the BOM,
+  normalizes line endings, collapses blank-line runs, and trims edges. Image/embed
+  references are kept.
+
 ## Deferred — intentionally not now
 
-Known and deliberately left alone for this round. Listed so they aren't
-re-discovered later as "new."
-
-- **Chunking** — hard rune-budget cut (no Markdown-aware boundaries, no overlap, no
-  heading paths). Deliberate placeholder.
-- **Token safety margin / `chars/4` underestimate** *(was E4)* — the chunker cuts at
-  `maxTokens * 4` runes and reports `runes/4` tokens
-  ([internal/chunker/hard_limit.go:50](../internal/chunker/hard_limit.go)). Markdown
-  and code tokenize denser than 4 chars/token, so real token counts can exceed the
-  model's limit and get truncated server-side. This is a chunker concern, so it rides
-  with the deferred chunking work. (§10.4)
-- **Parser normalization / cleanup before chunking** — the parser is a passthrough
-  ([internal/parser/markdown.go](../internal/parser/markdown.go)); trimming
-  trailing blank lines, collapsing blank runs, BOM removal, and dropping low-signal
-  fragments would live here (§9). Deferred. **Decision so far: keep image references**
-  (`![[file.pdf]]`, `![](url)`) — the filenames can carry signal, so do not strip
-  them. This is also where the low-signal / empty / URL-shred chunks observed in the
-  LM Studio logs would be cleaned up.
+- **Exact token counting / safety margin** — the chunker estimates tokens as ~`chars/4`
+  (`EstimateTokenCount`) with no model tokenizer. Fine at a 350-token budget (well under
+  the 2048 model limit), so low priority. A pure-Go option (`sugarme/tokenizer` loading
+  the model's `tokenizer.json`) is in reserve. (§10.4)
 - **Embedding request batching** — sending ≤16 chunks per HTTP request (§11.5) is
-  left out for now; see the multi-command note at the end.
+  left out for now; measured batching gave little gain on this hardware anyway (see
+  [research-vector-search-scaling.md](research-vector-search-scaling.md)).
+- **File rename does not re-embed** — a headingless note's title derives from its
+  filename, but renaming the file isn't a content change, so the content-hash skip
+  won't re-chunk it and the stored title/embedding goes stale until the content
+  changes. Edge case; low priority.
 
 ---
 
 ## Embedding
 
-> **Status: E1–E5 done** (not yet committed). The embedder
+> **Status: E1–E5 done.** The embedder
 > ([internal/embedder/openai.go](../internal/embedder/openai.go)) now uses a
 > timeout client, retries transient failures with capped exponential backoff,
 > checks HTTP status before decoding, validates returned dimensions at the boundary,
@@ -74,20 +75,23 @@ Search returned irrelevant, tiny results. Root cause was **not** the distance me
 (the model already returns unit vectors, so L2 is cosine-equivalent — confirmed by
 inspecting stored norms = 1.0). Two real causes:
 - The default model id was the placeholder `text-embedding-model`, which LM Studio
-  does not recognize (returns HTTP 400); set the default to the real
-  `text-embedding-nomic-embed-text-v1.5`.
-- nomic-embed requires task prefixes. The embedder now prepends a configurable
-  `Prefix`: `search_document:` for indexed chunks ([strategy.DefaultPool](../internal/strategy/default.go))
-  and `search_query:` for the query ([cmd/search.go](../cmd/search.go)). The stored
-  chunk text is unchanged; only the embedding input carries the prefix.
+  does not recognize (returns HTTP 400). Now defaults to the real
+  `text-embedding-embeddinggemma-300m-qat`.
+- The model requires prompt templates. Current default is **EmbeddingGemma**:
+  documents are formatted per-chunk by `embedder.DocumentInput` as
+  `title: <heading path or note name> | text: <body>`, and queries use `QueryPrefix`
+  (`task: search result | query:`) in [cmd/search.go](../cmd/search.go). The chunk
+  title lives in `chunks.title`; stored chunk text is the raw body.
+  (A `nomic-embed` setup with `search_document:` / `search_query:` prefixes was the
+  earlier default and also works via the `Prefix` field.)
 
-After re-embedding (`rebuild`), `search 3 payment` and `search 3 data` return the
-relevant chunks (tax/payout note; Google Cloud storage/database note).
+After re-embedding (`rebuild` or a reset + re-index), searches return relevant chunks
+with their heading-path/note-name title shown.
 
-**Follow-up:** the model id, base URL, dimensions, and prefixes are hardcoded to a
-nomic setup. They should become `--embedding-model` / `--embedding-url` flags (§5) so
-other models (e.g. EmbeddingGemma, which needs different prefixes) work without code
-changes. Changing the model or its prefixes requires a full re-embed.
+**Follow-up:** the model id, base URL, dimensions, and prompt templates are hardcoded.
+They should become `--embedding-model` / `--embedding-url` flags (§5) so switching
+models (which need different templates) works without code changes. Changing the model
+or its templates requires a full re-embed.
 
 ### E5. Configured-dimension validation happens too late — ✅ done
 ~~The embedder never validated returned vectors against the configured dimension.~~
@@ -204,6 +208,37 @@ one `Index` invocation the chunked-retry pass
 ([pkg/workflows.go:51](../pkg/workflows.go)) only does work across *separate*
 invocations. Keep it (it is the cross-run retry path) but the redundancy is worth a
 comment so it isn't mistaken for dead code.
+
+---
+
+## Architecture candidate: single-store vectors (sqlite-vec / vectorlite)
+
+Not scheduled — recorded so the trade-off is on the record.
+
+The project uses **two stores**: SQLite for metadata + a separate **LanceDB** table for
+vectors. The design spec mandated this
+([go-vector-indexer-implementation.md](go-vector-indexer-implementation.md) §6, and
+§28: "Do not model LanceDB as a SQLite extension" / "Do not substitute `sqlite-vec` …
+unless explicitly requested"). A vestigial `VECTOR_CLI_VECTORLITE_PATH` env var (§5)
+shows a single-store approach was considered early but not taken.
+
+An alternative is a **SQLite vector extension** (`sqlite-vec`, `vectorlite`) that keeps
+vectors *inside* SQLite:
+
+- **Pros:** one file, one transaction → vectors + metadata are atomic, which
+  **eliminates the entire L3 cross-store consistency problem** and the rebuild path;
+  vector search + metadata `JOIN` in one SQL query; HNSW ANN built in (better than our
+  current brute force).
+- **Cons:** still a per-platform **native dependency** (a loadable SQLite extension, so
+  the cgo-style packaging pain does not disappear); newer/smaller ecosystem; weaker at
+  the very large (millions–billions) scale where LanceDB's columnar format and index
+  options (IVF_PQ) shine.
+
+For a local, single-machine tool at small-to-moderate scale this is arguably the
+*simpler and more robust* architecture. The storage layer is already isolated behind
+interfaces (`internal/storage/lancedb`), so swapping backends is contained — mostly a
+rewrite of that package plus dropping the cross-store staging. Revisit if the two-store
+consistency burden or the lack of ANN becomes a real pain point.
 
 ---
 
