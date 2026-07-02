@@ -9,7 +9,6 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"semantic-search/internal/crawler"
 	sqlitemigrations "semantic-search/migrations/sqlite"
 )
 
@@ -247,7 +246,7 @@ func (s *Store) documentsNeedStatusMigration(ctx context.Context) (bool, error) 
 	return strings.Contains(createSQL, "'done'") || strings.Contains(createSQL, "'failed'"), nil
 }
 
-func (s *Store) UpsertDocuments(ctx context.Context, files []crawler.FileMetadata) error {
+func (s *Store) UpsertDocuments(ctx context.Context, files []FileMetadata) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

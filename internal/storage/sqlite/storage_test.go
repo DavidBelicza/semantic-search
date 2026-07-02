@@ -4,8 +4,6 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
-
-	"semantic-search/internal/crawler"
 )
 
 func TestEnsureSchemaCreatesDocumentsTable(t *testing.T) {
@@ -165,7 +163,7 @@ func TestApplyDocumentChunkReconcileSwapsKeptChunkIndexesWithoutUniqueViolation(
 	if err := store.EnsureSchema(ctx); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
-	if err := store.UpsertDocuments(ctx, []crawler.FileMetadata{{
+	if err := store.UpsertDocuments(ctx, []FileMetadata{{
 		FileID:       "1:100",
 		AbsolutePath: filepath.Clean("/tmp/docs/note.md"),
 		SizeBytes:    2,
@@ -226,20 +224,20 @@ func TestUpsertDocumentsInsertsAndUpdatesInBatch(t *testing.T) {
 		t.Fatalf("ensure schema: %v", err)
 	}
 
-	first := crawler.FileMetadata{
+	first := FileMetadata{
 		FileID:       "1:100",
 		AbsolutePath: filepath.Clean("/tmp/docs/README.md"),
 		SizeBytes:    10,
 		ModifiedAtNS: 100,
 	}
-	second := crawler.FileMetadata{
+	second := FileMetadata{
 		FileID:       "1:200",
 		AbsolutePath: filepath.Clean("/tmp/docs/notes/plan.md"),
 		SizeBytes:    20,
 		ModifiedAtNS: 200,
 	}
 
-	if err := store.UpsertDocuments(ctx, []crawler.FileMetadata{first, second}); err != nil {
+	if err := store.UpsertDocuments(ctx, []FileMetadata{first, second}); err != nil {
 		t.Fatalf("insert documents: %v", err)
 	}
 
@@ -247,14 +245,14 @@ func TestUpsertDocumentsInsertsAndUpdatesInBatch(t *testing.T) {
 		t.Fatalf("mark second embedded: %v", err)
 	}
 
-	if err := store.UpsertDocuments(ctx, []crawler.FileMetadata{first, second}); err != nil {
+	if err := store.UpsertDocuments(ctx, []FileMetadata{first, second}); err != nil {
 		t.Fatalf("upsert unchanged documents: %v", err)
 	}
 
 	first.SizeBytes = 15
 	first.ModifiedAtNS = 150
 	first.AbsolutePath = filepath.Clean("/tmp/docs/README-renamed.md")
-	if err := store.UpsertDocuments(ctx, []crawler.FileMetadata{first}); err != nil {
+	if err := store.UpsertDocuments(ctx, []FileMetadata{first}); err != nil {
 		t.Fatalf("update document: %v", err)
 	}
 
@@ -319,13 +317,13 @@ func TestDocumentsByStatusAndScanUpdates(t *testing.T) {
 		t.Fatalf("ensure schema: %v", err)
 	}
 
-	file := crawler.FileMetadata{
+	file := FileMetadata{
 		FileID:       "1:100",
 		AbsolutePath: filepath.Clean("/tmp/docs/README.md"),
 		SizeBytes:    10,
 		ModifiedAtNS: 100,
 	}
-	if err := store.UpsertDocuments(ctx, []crawler.FileMetadata{file}); err != nil {
+	if err := store.UpsertDocuments(ctx, []FileMetadata{file}); err != nil {
 		t.Fatalf("insert document: %v", err)
 	}
 
@@ -375,13 +373,13 @@ func TestApplyDocumentChunkReconcileKeepsInsertsAndDeletes(t *testing.T) {
 		t.Fatalf("ensure schema: %v", err)
 	}
 
-	file := crawler.FileMetadata{
+	file := FileMetadata{
 		FileID:       "1:100",
 		AbsolutePath: filepath.Clean("/tmp/docs/README.md"),
 		SizeBytes:    10,
 		ModifiedAtNS: 100,
 	}
-	if err := store.UpsertDocuments(ctx, []crawler.FileMetadata{file}); err != nil {
+	if err := store.UpsertDocuments(ctx, []FileMetadata{file}); err != nil {
 		t.Fatalf("insert document: %v", err)
 	}
 

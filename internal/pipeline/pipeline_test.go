@@ -1,94 +1,42 @@
-package strategy
+package pipeline
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 
-	"semantic-search/internal/chunker"
+	"semantic-search/internal/ingest"
 	storage "semantic-search/internal/storage/sqlite"
+	"semantic-search/internal/strategy"
 )
 
-func TestDefaultPoolSupportsMarkdownOnly(t *testing.T) {
-	pool := DefaultPool()
-	for _, path := range []string{"note.md", "note.markdown", "note.mdown", "NOTE.MD"} {
-		if !pool.Supports(path) {
-			t.Fatalf("expected default pool to support %q", path)
-		}
-	}
-
-	if pool.Supports("note.txt") {
-		t.Fatal("expected default pool to reject note.txt")
-	}
+func markdownPool(text string) strategy.Pool {
+	return strategy.NewPool(fakeStrategy{text: text, maxRunes: 3})
 }
 
-func TestFileStrategyProcessesWithReaderParserAndChunker(t *testing.T) {
+func TestProcessScannedReconcilesChunksEmbedsAndMarksEmbedded(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "note.md")
-	if err := os.WriteFile(path, []byte("abcdefg"), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	fileStrategy, ok := DefaultPool().Find(path)
-	if !ok {
-		t.Fatal("expected markdown strategy")
-	}
-	fileStrategy.Chunker = chunker.HardLimitChunker{MaxTokens: 3, AverageTokenLength: 1}
-
-	chunks, err := fileStrategy.Process(context.Background(), storage.Document{AbsolutePath: path})
-	if err != nil {
-		t.Fatalf("process file: %v", err)
-	}
-
-	if len(chunks) != 3 {
-		t.Fatalf("chunk count mismatch: want 3, got %d", len(chunks))
-	}
-}
-
-func TestProcessScannedDocumentsReconcilesChunksEmbedsAndMarksEmbedded(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "note.md")
-	if err := os.WriteFile(path, []byte("abcdefg"), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	store := &memoryStrategyStore{
+	store := &memoryStore{
 		documents: []storage.Document{
-			{
-				ID:           42,
-				FileID:       "1:100",
-				AbsolutePath: path,
-				Status:       storage.DocumentStatusScanned,
-			},
+			{ID: 42, FileID: "1:100", AbsolutePath: path, Status: storage.DocumentStatusScanned},
 		},
 		chunks: map[int64][]storage.Chunk{
-			42: {
-				{ID: 99, DocumentID: 42, ChunkIndex: 0, Text: "old", ContentHash: "old"},
-			},
+			42: {{ID: 99, DocumentID: 42, ChunkIndex: 0, Text: "old", ContentHash: "old"}},
 		},
 		nextChunkID: 100,
 	}
 	vectorStore := &memoryVectorStore{}
-	pool := Pool{
-		{
-			Extensions: []string{".md"},
-			Reader:     fakeReader{text: "abcdefg"},
-			Parser:     fakeParser{},
-			Chunker:    chunker.HardLimitChunker{MaxTokens: 3, AverageTokenLength: 1},
-			Embedder:   fakeEmbedder{},
-		},
-	}
 
-	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool, false)
+	result, err := newProcessingPipeline(store, vectorStore, markdownPool("abcdefg"), fakeEmbedder{}).processScanned(context.Background(), false)
 	if err != nil {
-		t.Fatalf("process scanned documents: %v", err)
+		t.Fatalf("process scanned: %v", err)
 	}
 
-	if result.Processed != 1 {
-		t.Fatalf("processed count mismatch: want 1, got %d", result.Processed)
-	}
-	if result.Embedded != 1 {
-		t.Fatalf("embedded count mismatch: want 1, got %d", result.Embedded)
+	if result.Processed != 1 || result.Embedded != 1 {
+		t.Fatalf("result mismatch: %#v", result)
 	}
 	if store.documents[0].Status != storage.DocumentStatusEmbedded {
 		t.Fatalf("status mismatch: want embedded, got %q", store.documents[0].Status)
@@ -104,40 +52,22 @@ func TestProcessScannedDocumentsReconcilesChunksEmbedsAndMarksEmbedded(t *testin
 	}
 }
 
-func TestProcessScannedDocumentsKeepsUnchangedChunksAndEmbedsNewChunks(t *testing.T) {
+func TestProcessScannedKeepsUnchangedChunksAndEmbedsNewChunks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "note.md")
-	store := &memoryStrategyStore{
+	store := &memoryStore{
 		documents: []storage.Document{
-			{
-				ID:                  42,
-				FileID:              "1:100",
-				AbsolutePath:        path,
-				Status:              storage.DocumentStatusScanned,
-				ContentHash:         "new-content-hash",
-				EmbeddedContentHash: "old-content-hash",
-			},
+			{ID: 42, FileID: "1:100", AbsolutePath: path, Status: storage.DocumentStatusScanned, ContentHash: "new-content-hash", EmbeddedContentHash: "old-content-hash"},
 		},
 		chunks: map[int64][]storage.Chunk{
-			42: {
-				{ID: 100, DocumentID: 42, ChunkIndex: 0, Text: "abc", ContentHash: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
-			},
+			42: {{ID: 100, DocumentID: 42, ChunkIndex: 0, Text: "abc", ContentHash: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}},
 		},
 		nextChunkID: 101,
 	}
 	vectorStore := &memoryVectorStore{}
-	pool := Pool{
-		{
-			Extensions: []string{".md"},
-			Reader:     fakeReader{text: "abcdef"},
-			Parser:     fakeParser{},
-			Chunker:    chunker.HardLimitChunker{MaxTokens: 3, AverageTokenLength: 1},
-			Embedder:   fakeEmbedder{},
-		},
-	}
 
-	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool, false)
+	result, err := newProcessingPipeline(store, vectorStore, markdownPool("abcdef"), fakeEmbedder{}).processScanned(context.Background(), false)
 	if err != nil {
-		t.Fatalf("process scanned documents: %v", err)
+		t.Fatalf("process scanned: %v", err)
 	}
 
 	if result.Embedded != 1 {
@@ -157,16 +87,11 @@ func TestProcessScannedDocumentsKeepsUnchangedChunksAndEmbedsNewChunks(t *testin
 	}
 }
 
-func TestProcessScannedDocumentsEmbedsAllChunksWhenScannedDocumentHasNoChunkChanges(t *testing.T) {
+func TestProcessScannedEmbedsAllChunksWhenNeverEmbedded(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "note.md")
-	store := &memoryStrategyStore{
+	store := &memoryStore{
 		documents: []storage.Document{
-			{
-				ID:           42,
-				FileID:       "1:100",
-				AbsolutePath: path,
-				Status:       storage.DocumentStatusScanned,
-			},
+			{ID: 42, FileID: "1:100", AbsolutePath: path, Status: storage.DocumentStatusScanned},
 		},
 		chunks: map[int64][]storage.Chunk{
 			42: {
@@ -176,19 +101,10 @@ func TestProcessScannedDocumentsEmbedsAllChunksWhenScannedDocumentHasNoChunkChan
 		},
 	}
 	vectorStore := &memoryVectorStore{}
-	pool := Pool{
-		{
-			Extensions: []string{".md"},
-			Reader:     fakeReader{text: "abcdef"},
-			Parser:     fakeParser{},
-			Chunker:    chunker.HardLimitChunker{MaxTokens: 3, AverageTokenLength: 1},
-			Embedder:   fakeEmbedder{},
-		},
-	}
 
-	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool, false)
+	result, err := newProcessingPipeline(store, vectorStore, markdownPool("abcdef"), fakeEmbedder{}).processScanned(context.Background(), false)
 	if err != nil {
-		t.Fatalf("process scanned documents: %v", err)
+		t.Fatalf("process scanned: %v", err)
 	}
 
 	if result.Embedded != 1 {
@@ -205,18 +121,11 @@ func TestProcessScannedDocumentsEmbedsAllChunksWhenScannedDocumentHasNoChunkChan
 	}
 }
 
-func TestProcessScannedDocumentsSkipsReembeddingWhenAlreadyEmbeddedAndUnchanged(t *testing.T) {
+func TestProcessScannedSkipsReembeddingWhenAlreadyEmbeddedAndUnchanged(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "note.md")
-	store := &memoryStrategyStore{
+	store := &memoryStore{
 		documents: []storage.Document{
-			{
-				ID:                  42,
-				FileID:              "1:100",
-				AbsolutePath:        path,
-				Status:              storage.DocumentStatusScanned,
-				ContentHash:         "content-hash",
-				EmbeddedContentHash: "content-hash",
-			},
+			{ID: 42, FileID: "1:100", AbsolutePath: path, Status: storage.DocumentStatusScanned, ContentHash: "content-hash", EmbeddedContentHash: "content-hash"},
 		},
 		chunks: map[int64][]storage.Chunk{
 			42: {
@@ -226,19 +135,10 @@ func TestProcessScannedDocumentsSkipsReembeddingWhenAlreadyEmbeddedAndUnchanged(
 		},
 	}
 	vectorStore := &memoryVectorStore{}
-	pool := Pool{
-		{
-			Extensions: []string{".md"},
-			Reader:     fakeReader{text: "abcdef"},
-			Parser:     fakeParser{},
-			Chunker:    chunker.HardLimitChunker{MaxTokens: 3, AverageTokenLength: 1},
-			Embedder:   fakeEmbedder{},
-		},
-	}
 
-	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool, false)
+	result, err := newProcessingPipeline(store, vectorStore, markdownPool("abcdef"), fakeEmbedder{}).processScanned(context.Background(), false)
 	if err != nil {
-		t.Fatalf("process scanned documents: %v", err)
+		t.Fatalf("process scanned: %v", err)
 	}
 
 	if result.Embedded != 0 {
@@ -255,16 +155,11 @@ func TestProcessScannedDocumentsSkipsReembeddingWhenAlreadyEmbeddedAndUnchanged(
 	}
 }
 
-func TestProcessChunkedDocumentsEmbedsAndMarksEmbedded(t *testing.T) {
+func TestProcessChunkedEmbedsAndMarksEmbedded(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "note.md")
-	store := &memoryStrategyStore{
+	store := &memoryStore{
 		documents: []storage.Document{
-			{
-				ID:           42,
-				FileID:       "1:100",
-				AbsolutePath: path,
-				Status:       storage.DocumentStatusChunked,
-			},
+			{ID: 42, FileID: "1:100", AbsolutePath: path, Status: storage.DocumentStatusChunked},
 		},
 		chunks: map[int64][]storage.Chunk{
 			42: {
@@ -274,16 +169,10 @@ func TestProcessChunkedDocumentsEmbedsAndMarksEmbedded(t *testing.T) {
 		},
 	}
 	vectorStore := &memoryVectorStore{}
-	pool := Pool{
-		{
-			Extensions: []string{".md"},
-			Embedder:   fakeEmbedder{},
-		},
-	}
 
-	result, err := ProcessChunkedDocuments(context.Background(), store, vectorStore, pool, false)
+	result, err := newProcessingPipeline(store, vectorStore, strategy.NewPool(), fakeEmbedder{}).processChunked(context.Background(), false)
 	if err != nil {
-		t.Fatalf("process chunked documents: %v", err)
+		t.Fatalf("process chunked: %v", err)
 	}
 
 	if result.Processed != 1 || result.Embedded != 1 {
@@ -297,30 +186,16 @@ func TestProcessChunkedDocumentsEmbedsAndMarksEmbedded(t *testing.T) {
 	}
 }
 
-func TestProcessScannedDocumentsLeavesDocumentChunkedWhenEmbeddingFails(t *testing.T) {
+func TestProcessScannedLeavesDocumentChunkedWhenEmbeddingFails(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "note.md")
-	store := &memoryStrategyStore{
+	store := &memoryStore{
 		documents: []storage.Document{
-			{
-				ID:           42,
-				FileID:       "1:100",
-				AbsolutePath: path,
-				Status:       storage.DocumentStatusScanned,
-			},
+			{ID: 42, FileID: "1:100", AbsolutePath: path, Status: storage.DocumentStatusScanned},
 		},
 		nextChunkID: 100,
 	}
-	pool := Pool{
-		{
-			Extensions: []string{".md"},
-			Reader:     fakeReader{text: "abc"},
-			Parser:     fakeParser{},
-			Chunker:    chunker.HardLimitChunker{MaxTokens: 3, AverageTokenLength: 1},
-			Embedder:   fakeFailingEmbedder{},
-		},
-	}
 
-	_, err := ProcessScannedDocuments(context.Background(), store, &memoryVectorStore{}, pool, false)
+	_, err := newProcessingPipeline(store, &memoryVectorStore{}, markdownPool("abc"), fakeFailingEmbedder{}).processScanned(context.Background(), false)
 	if err == nil {
 		t.Fatal("expected embedding error")
 	}
@@ -332,8 +207,8 @@ func TestProcessScannedDocumentsLeavesDocumentChunkedWhenEmbeddingFails(t *testi
 	}
 }
 
-func TestProcessScannedDocumentsContinuesAfterErrorWhenNotFailFast(t *testing.T) {
-	store := &memoryStrategyStore{
+func TestProcessScannedContinuesAfterErrorWhenNotFailFast(t *testing.T) {
+	store := &memoryStore{
 		documents: []storage.Document{
 			{ID: 1, FileID: "1:1", AbsolutePath: "/x/unsupported.txt", Status: storage.DocumentStatusScanned},
 			{ID: 2, FileID: "1:2", AbsolutePath: "/x/note.md", Status: storage.DocumentStatusScanned},
@@ -341,17 +216,8 @@ func TestProcessScannedDocumentsContinuesAfterErrorWhenNotFailFast(t *testing.T)
 		nextChunkID: 100,
 	}
 	vectorStore := &memoryVectorStore{}
-	pool := Pool{
-		{
-			Extensions: []string{".md"},
-			Reader:     fakeReader{text: "abc"},
-			Parser:     fakeParser{},
-			Chunker:    chunker.HardLimitChunker{MaxTokens: 3, AverageTokenLength: 1},
-			Embedder:   fakeEmbedder{},
-		},
-	}
 
-	result, err := ProcessScannedDocuments(context.Background(), store, vectorStore, pool, false)
+	result, err := newProcessingPipeline(store, vectorStore, markdownPool("abc"), fakeEmbedder{}).processScanned(context.Background(), false)
 	if err == nil {
 		t.Fatal("expected an aggregated error for the unsupported document")
 	}
@@ -363,25 +229,16 @@ func TestProcessScannedDocumentsContinuesAfterErrorWhenNotFailFast(t *testing.T)
 	}
 }
 
-func TestProcessScannedDocumentsStopsOnFirstErrorWhenFailFast(t *testing.T) {
-	store := &memoryStrategyStore{
+func TestProcessScannedStopsOnFirstErrorWhenFailFast(t *testing.T) {
+	store := &memoryStore{
 		documents: []storage.Document{
 			{ID: 1, FileID: "1:1", AbsolutePath: "/x/unsupported.txt", Status: storage.DocumentStatusScanned},
 			{ID: 2, FileID: "1:2", AbsolutePath: "/x/note.md", Status: storage.DocumentStatusScanned},
 		},
 		nextChunkID: 100,
 	}
-	pool := Pool{
-		{
-			Extensions: []string{".md"},
-			Reader:     fakeReader{text: "abc"},
-			Parser:     fakeParser{},
-			Chunker:    chunker.HardLimitChunker{MaxTokens: 3, AverageTokenLength: 1},
-			Embedder:   fakeEmbedder{},
-		},
-	}
 
-	result, err := ProcessScannedDocuments(context.Background(), store, &memoryVectorStore{}, pool, true)
+	result, err := newProcessingPipeline(store, &memoryVectorStore{}, markdownPool("abc"), fakeEmbedder{}).processScanned(context.Background(), true)
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -393,50 +250,55 @@ func TestProcessScannedDocumentsStopsOnFirstErrorWhenFailFast(t *testing.T) {
 	}
 }
 
-func TestRebuildVectorsReembedsEmbeddedDocuments(t *testing.T) {
-	store := &memoryStrategyStore{
-		documents: []storage.Document{
-			{ID: 1, FileID: "1:1", AbsolutePath: "/x/a.md", Status: storage.DocumentStatusEmbedded, ContentHash: "h1", EmbeddedContentHash: "h1"},
-		},
-		chunks: map[int64][]storage.Chunk{
-			1: {
-				{ID: 10, DocumentID: 1, ChunkIndex: 0, Text: "abc", ContentHash: "c0"},
-				{ID: 11, DocumentID: 1, ChunkIndex: 1, Text: "def", ContentHash: "c1"},
-			},
-		},
-	}
-	vectorStore := &memoryVectorStore{}
-	pool := Pool{
-		{
-			Extensions: []string{".md"},
-			Embedder:   fakeEmbedder{},
-		},
-	}
+// --- test doubles ---
 
-	result, err := RebuildVectors(context.Background(), store, vectorStore, pool, false)
-	if err != nil {
-		t.Fatalf("rebuild vectors: %v", err)
-	}
-	if result.Processed != 1 || result.Embedded != 1 {
-		t.Fatalf("result mismatch: %#v", result)
-	}
-	if len(vectorStore.embeddings) != 2 {
-		t.Fatalf("embedding count mismatch: want 2, got %d", len(vectorStore.embeddings))
-	}
+type fakeStrategy struct {
+	text     string
+	maxRunes int
 }
 
-type fakeReader struct {
-	text string
+func (fakeStrategy) Extensions() []string { return []string{".md"} }
+
+func (fakeStrategy) Discovery(rootPath string, options ingest.Options) ([]storage.FileMetadata, error) {
+	return nil, nil
 }
 
-func (r fakeReader) Read(ctx context.Context, document storage.Document) (string, error) {
-	return r.text, nil
+func (fakeStrategy) Registration(ctx context.Context, store ingest.MetadataStore, files []storage.FileMetadata) error {
+	return nil
 }
 
-type fakeParser struct{}
+func (fakeStrategy) Fingerprinting(ctx context.Context, store ingest.Store, failFast bool) error {
+	return nil
+}
 
-func (p fakeParser) Parse(ctx context.Context, text string) (string, error) {
+func (s fakeStrategy) Read(ctx context.Context, doc storage.Document) (string, error) {
+	return s.text, nil
+}
+
+func (s fakeStrategy) Parse(ctx context.Context, text string) (string, error) {
 	return text, nil
+}
+
+func (s fakeStrategy) Chunk(ctx context.Context, doc storage.Document, text string) ([]storage.Chunk, error) {
+	runes := []rune(text)
+	var chunks []storage.Chunk
+	for start := 0; start < len(runes); start += s.maxRunes {
+		end := start + s.maxRunes
+		if end > len(runes) {
+			end = len(runes)
+		}
+		piece := string(runes[start:end])
+		sum := sha256.Sum256([]byte(piece))
+		chunks = append(chunks, storage.Chunk{
+			ChunkIndex:  len(chunks),
+			Text:        piece,
+			StartOffset: start,
+			EndOffset:   end,
+			ContentHash: hex.EncodeToString(sum[:]),
+		})
+	}
+
+	return chunks, nil
 }
 
 type fakeEmbedder struct{}
@@ -455,13 +317,13 @@ func (e fakeFailingEmbedder) Embed(ctx context.Context, texts []string) ([][]flo
 	return nil, errors.New("embedding failed")
 }
 
-type memoryStrategyStore struct {
+type memoryStore struct {
 	documents   []storage.Document
 	chunks      map[int64][]storage.Chunk
 	nextChunkID int64
 }
 
-func (s *memoryStrategyStore) DocumentsByStatus(ctx context.Context, status string, afterID int64, limit int) ([]storage.Document, error) {
+func (s *memoryStore) DocumentsByStatus(ctx context.Context, status string, afterID int64, limit int) ([]storage.Document, error) {
 	var documents []storage.Document
 	for _, document := range s.documents {
 		if document.Status != status || document.ID <= afterID {
@@ -476,7 +338,7 @@ func (s *memoryStrategyStore) DocumentsByStatus(ctx context.Context, status stri
 	return documents, nil
 }
 
-func (s *memoryStrategyStore) ApplyDocumentChunkReconcile(ctx context.Context, documentID int64, plan storage.ChunkReconcilePlan) ([]storage.Chunk, error) {
+func (s *memoryStore) ApplyDocumentChunkReconcile(ctx context.Context, documentID int64, plan storage.ChunkReconcilePlan) ([]storage.Chunk, error) {
 	if s.chunks == nil {
 		s.chunks = map[int64][]storage.Chunk{}
 	}
@@ -519,11 +381,11 @@ func (s *memoryStrategyStore) ApplyDocumentChunkReconcile(ctx context.Context, d
 	return inserted, nil
 }
 
-func (s *memoryStrategyStore) ChunksByDocumentID(ctx context.Context, documentID int64) ([]storage.Chunk, error) {
+func (s *memoryStore) ChunksByDocumentID(ctx context.Context, documentID int64) ([]storage.Chunk, error) {
 	return s.chunks[documentID], nil
 }
 
-func (s *memoryStrategyStore) UpdateDocumentStatus(ctx context.Context, fileID string, status string) error {
+func (s *memoryStore) UpdateDocumentStatus(ctx context.Context, fileID string, status string) error {
 	for i := range s.documents {
 		if s.documents[i].FileID == fileID {
 			s.documents[i].Status = status
@@ -533,7 +395,7 @@ func (s *memoryStrategyStore) UpdateDocumentStatus(ctx context.Context, fileID s
 	return nil
 }
 
-func (s *memoryStrategyStore) MarkDocumentEmbedded(ctx context.Context, fileID string, contentHash string) error {
+func (s *memoryStore) MarkDocumentEmbedded(ctx context.Context, fileID string, contentHash string) error {
 	for i := range s.documents {
 		if s.documents[i].FileID != fileID {
 			continue

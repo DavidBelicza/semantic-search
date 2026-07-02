@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"semantic-search/internal/storage/sqlitevec"
 	storage "semantic-search/internal/storage/sqlite"
+	"semantic-search/internal/storage/sqlitevec"
 )
 
 func TestNewSearchCommandShowsHelp(t *testing.T) {

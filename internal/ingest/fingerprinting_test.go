@@ -1,4 +1,4 @@
-package scanner
+package ingest
 
 import (
 	"context"
@@ -9,13 +9,13 @@ import (
 	storage "semantic-search/internal/storage/sqlite"
 )
 
-func TestHashFileReturnsSHA256Hex(t *testing.T) {
+func TestFingerprintFileReturnsSHA256Hex(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "note.md")
 	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 
-	got, err := HashFile(path)
+	got, err := fingerprintFile(path)
 	if err != nil {
 		t.Fatalf("hash file: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestHashFileReturnsSHA256Hex(t *testing.T) {
 	}
 }
 
-func TestScanIndexedDocumentsMarksSameMetadataScannedWithoutHashing(t *testing.T) {
+func TestFingerprintIndexedDocumentsMarksSameMetadataScannedWithoutHashing(t *testing.T) {
 	store := &memoryScanStore{
 		documents: []storage.Document{
 			{
@@ -45,7 +45,7 @@ func TestScanIndexedDocumentsMarksSameMetadataScannedWithoutHashing(t *testing.T
 		},
 	}
 
-	result, err := ScanIndexedDocuments(context.Background(), store, false)
+	result, err := FingerprintIndexedDocuments(context.Background(), store, false)
 	if err != nil {
 		t.Fatalf("scan indexed documents: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestScanIndexedDocumentsMarksSameMetadataScannedWithoutHashing(t *testing.T
 	}
 }
 
-func TestScanIndexedDocumentsHashesAndMarksScannedWhenContentChanged(t *testing.T) {
+func TestFingerprintIndexedDocumentsHashesAndMarksScannedWhenContentChanged(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "note.md")
 	if err := os.WriteFile(path, []byte("new content"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
@@ -79,7 +79,7 @@ func TestScanIndexedDocumentsHashesAndMarksScannedWhenContentChanged(t *testing.
 		},
 	}
 
-	result, err := ScanIndexedDocuments(context.Background(), store, false)
+	result, err := FingerprintIndexedDocuments(context.Background(), store, false)
 	if err != nil {
 		t.Fatalf("scan indexed documents: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestScanIndexedDocumentsHashesAndMarksScannedWhenContentChanged(t *testing.
 	}
 }
 
-func TestScanIndexedDocumentsRestoresEmbeddedWhenContentMatchesEmbeddedHash(t *testing.T) {
+func TestFingerprintIndexedDocumentsRestoresEmbeddedWhenContentMatchesEmbeddedHash(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "note.md")
 	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
@@ -124,7 +124,7 @@ func TestScanIndexedDocumentsRestoresEmbeddedWhenContentMatchesEmbeddedHash(t *t
 		},
 	}
 
-	result, err := ScanIndexedDocuments(context.Background(), store, false)
+	result, err := FingerprintIndexedDocuments(context.Background(), store, false)
 	if err != nil {
 		t.Fatalf("scan indexed documents: %v", err)
 	}

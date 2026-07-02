@@ -3,21 +3,11 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"database/sql"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
-
-	"semantic-search/internal/chunker"
-	"semantic-search/internal/crawler"
-	"semantic-search/internal/parser"
-	"semantic-search/internal/reader"
-	"semantic-search/internal/storage/sqlitevec"
 	storage "semantic-search/internal/storage/sqlite"
-	"semantic-search/internal/strategy"
+	"semantic-search/internal/storage/sqlitevec"
 )
 
 func TestNewIndexCommandShowsHelp(t *testing.T) {
@@ -45,86 +35,10 @@ func TestNewIndexCommandRequiresPath(t *testing.T) {
 	}
 }
 
-func TestNewIndexCommandStoresMetadataAndScansContent(t *testing.T) {
-	root := t.TempDir()
-	dbPath := filepath.Join(t.TempDir(), "index.db")
-	nested := filepath.Join(root, "notes", "daily")
-	if err := os.MkdirAll(nested, 0o755); err != nil {
-		t.Fatalf("create nested directory: %v", err)
-	}
-
-	readmeFile := filepath.Join(root, "README.md")
-	planFile := filepath.Join(root, "notes", "plan.md")
-	entryFile := filepath.Join(nested, "entry.md")
-	ignoredFile := filepath.Join(root, "ignore.txt")
-
-	files := []string{readmeFile, planFile, entryFile, ignoredFile}
-	for _, file := range files {
-		if err := os.WriteFile(file, []byte("test"), 0o644); err != nil {
-			t.Fatalf("write test file %q: %v", file, err)
-		}
-	}
-
-	var out bytes.Buffer
-	store, err := storage.Open(dbPath)
-	if err != nil {
-		t.Fatalf("open storage: %v", err)
-	}
-	defer store.Close()
-	if err := store.EnsureSchema(context.Background()); err != nil {
-		t.Fatalf("ensure schema: %v", err)
-	}
-
-	vectorStore := &fakeVectorStore{}
-	indexCmd := NewIndexCommandWithPool(&out, store, vectorStore, fakeIndexStrategyPool())
-	indexCmd.SetArgs([]string{root})
-
-	if err := indexCmd.Execute(); err != nil {
-		t.Fatalf("execute index: %v", err)
-	}
-
-	if out.Len() != 0 {
-		t.Fatalf("expected no index output, got %q", out.String())
-	}
-
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		t.Fatalf("open sqlite db: %v", err)
-	}
-	defer db.Close()
-
-	var count int
-	if err := db.QueryRow("SELECT COUNT(*) FROM documents").Scan(&count); err != nil {
-		t.Fatalf("count documents: %v", err)
-	}
-	if count != 3 {
-		t.Fatalf("document count mismatch: want 3, got %d", count)
-	}
-
-	var embeddedCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM documents WHERE content_hash IS NOT NULL AND status = ?", storage.DocumentStatusEmbedded).Scan(&embeddedCount); err != nil {
-		t.Fatalf("count embedded documents: %v", err)
-	}
-	if embeddedCount != 3 {
-		t.Fatalf("embedded document count mismatch: want 3, got %d", embeddedCount)
-	}
-
-	var chunkCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM chunks").Scan(&chunkCount); err != nil {
-		t.Fatalf("count chunks: %v", err)
-	}
-	if chunkCount != 3 {
-		t.Fatalf("chunk count mismatch: want 3, got %d", chunkCount)
-	}
-
-	if len(vectorStore.embeddings) != 3 {
-		t.Fatalf("embedding count mismatch: want 3, got %d", len(vectorStore.embeddings))
-	}
-}
 
 type fakeDocumentStore struct{}
 
-func (s *fakeDocumentStore) UpsertDocuments(ctx context.Context, files []crawler.FileMetadata) error {
+func (s *fakeDocumentStore) UpsertDocuments(ctx context.Context, files []storage.FileMetadata) error {
 	return nil
 }
 
@@ -177,26 +91,4 @@ func (s *fakeVectorStore) Replace(ctx context.Context, embeddings []storage.Chun
 
 func (s *fakeVectorStore) Search(ctx context.Context, query []float32, limit int) ([]sqlitevec.VectorHit, error) {
 	return nil, nil
-}
-
-type fakeIndexEmbedder struct{}
-
-func (e fakeIndexEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
-	vectors := make([][]float32, len(texts))
-	for i := range texts {
-		vectors[i] = []float32{float32(i), float32(len(texts[i]))}
-	}
-	return vectors, nil
-}
-
-func fakeIndexStrategyPool() strategy.Pool {
-	return strategy.Pool{
-		{
-			Extensions: []string{".md", ".markdown", ".mdown"},
-			Reader:     reader.MarkdownReader{},
-			Parser:     parser.MarkdownParser{},
-			Chunker:    chunker.NewHardLimitChunker(chunker.DefaultMaxTokens),
-			Embedder:   fakeIndexEmbedder{},
-		},
-	}
 }

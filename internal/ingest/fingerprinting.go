@@ -1,4 +1,4 @@
-package scanner
+package ingest
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	storage "semantic-search/internal/storage/sqlite"
 )
 
-const scanBatchSize = 1
+const fingerprintBatchSize = 1
 
 type Store interface {
 	DocumentsByStatus(ctx context.Context, status string, afterID int64, limit int) ([]storage.Document, error)
@@ -24,17 +24,17 @@ type Result struct {
 	Scanned int
 }
 
-// ScanIndexedDocuments hashes indexed documents one by one. With failFast unset, a
+// FingerprintIndexedDocuments hashes indexed documents one by one. With failFast unset, a
 // per-document failure is recorded and scanning continues; the collected errors are
 // joined and returned once every document has been visited. Pagination is by ascending
 // id so a failed (and therefore still-indexed) document is not revisited in this run.
-func ScanIndexedDocuments(ctx context.Context, store Store, failFast bool) (Result, error) {
+func FingerprintIndexedDocuments(ctx context.Context, store Store, failFast bool) (Result, error) {
 	var result Result
 	var errs []error
 	var afterID int64
 
 	for {
-		documents, err := store.DocumentsByStatus(ctx, storage.DocumentStatusIndexed, afterID, scanBatchSize)
+		documents, err := store.DocumentsByStatus(ctx, storage.DocumentStatusIndexed, afterID, fingerprintBatchSize)
 		if err != nil {
 			return result, err
 		}
@@ -44,7 +44,7 @@ func ScanIndexedDocuments(ctx context.Context, store Store, failFast bool) (Resu
 
 		for _, document := range documents {
 			afterID = document.ID
-			status, err := scanDocument(ctx, store, document)
+			status, err := fingerprintDocument(ctx, store, document)
 			if err != nil && failFast {
 				return result, err
 			}
@@ -60,12 +60,12 @@ func ScanIndexedDocuments(ctx context.Context, store Store, failFast bool) (Resu
 	}
 }
 
-func scanDocument(ctx context.Context, store Store, document storage.Document) (string, error) {
+func fingerprintDocument(ctx context.Context, store Store, document storage.Document) (string, error) {
 	if metadataMatchesCheckpoint(document) {
 		return markCheckpoint(ctx, store, document, storage.DocumentStatusScanned)
 	}
 
-	contentHash, err := HashFile(document.AbsolutePath)
+	contentHash, err := fingerprintFile(document.AbsolutePath)
 	if err != nil {
 		return "", fmt.Errorf("hash file %q: %w", document.AbsolutePath, err)
 	}
@@ -102,7 +102,7 @@ func markCheckpoint(ctx context.Context, store Store, document storage.Document,
 	return status, nil
 }
 
-func HashFile(path string) (string, error) {
+func fingerprintFile(path string) (string, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err

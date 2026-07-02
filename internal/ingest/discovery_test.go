@@ -1,14 +1,15 @@
-package crawler
+package ingest
 
 import (
 	"os"
 	"path/filepath"
 	"reflect"
+	storage "semantic-search/internal/storage/sqlite"
 	"strings"
 	"testing"
 )
 
-func TestCollectFileMetadataReturnsRecursiveRegularFiles(t *testing.T) {
+func TestDiscoverFilesReturnsRecursiveRegularFiles(t *testing.T) {
 	root := t.TempDir()
 	nested := filepath.Join(root, "notes", "daily")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
@@ -25,7 +26,7 @@ func TestCollectFileMetadataReturnsRecursiveRegularFiles(t *testing.T) {
 		}
 	}
 
-	got, err := CollectFileMetadata(root, Options{})
+	got, err := DiscoverFiles(root, Options{})
 	if err != nil {
 		t.Fatalf("collect file metadata: %v", err)
 	}
@@ -50,7 +51,7 @@ func TestCollectFileMetadataReturnsRecursiveRegularFiles(t *testing.T) {
 	}
 }
 
-func TestCollectFileMetadataSkipsVcsBuildAndHiddenByDefault(t *testing.T) {
+func TestDiscoverFilesSkipsVcsBuildAndHiddenByDefault(t *testing.T) {
 	root := t.TempDir()
 	write := func(rel string) string {
 		full := filepath.Join(root, rel)
@@ -69,7 +70,7 @@ func TestCollectFileMetadataSkipsVcsBuildAndHiddenByDefault(t *testing.T) {
 	hiddenDirFile := write(".hidden/note.md")
 	hiddenFile := write(".secret.md")
 
-	got, err := CollectFileMetadata(root, Options{})
+	got, err := DiscoverFiles(root, Options{})
 	if err != nil {
 		t.Fatalf("collect: %v", err)
 	}
@@ -77,7 +78,7 @@ func TestCollectFileMetadataSkipsVcsBuildAndHiddenByDefault(t *testing.T) {
 		t.Fatalf("expected only keep.md by default, got %#v", collectPaths(got))
 	}
 
-	withHidden, err := CollectFileMetadata(root, Options{IncludeHidden: true})
+	withHidden, err := DiscoverFiles(root, Options{IncludeHidden: true})
 	if err != nil {
 		t.Fatalf("collect with hidden: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestCollectFileMetadataSkipsVcsBuildAndHiddenByDefault(t *testing.T) {
 	}
 }
 
-func collectPaths(files []FileMetadata) []string {
+func collectPaths(files []storage.FileMetadata) []string {
 	paths := make([]string, 0, len(files))
 	for _, file := range files {
 		paths = append(paths, file.AbsolutePath)
