@@ -46,7 +46,6 @@ func NewMarkdownStrategy(general GeneralStrategy) Strategy {
 	}
 }
 
-// Claims accepts Markdown files by extension — the strategy's own rule.
 func (markdownStrategy) Claims(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".md", ".markdown", ".mdown":
@@ -56,18 +55,14 @@ func (markdownStrategy) Claims(path string) bool {
 	}
 }
 
-// CreateMetadata reuses the generic metadata build.
 func (s markdownStrategy) CreateMetadata(file FileRef) (storage.FileMetadata, error) {
 	return s.general.CreateMetadata(file)
 }
 
-// Fingerprint reuses the generic content hash.
 func (s markdownStrategy) Fingerprint(content []byte) string {
 	return s.general.Fingerprint(content)
 }
 
-// Parse decodes the bytes as Markdown text and normalizes it: strip a UTF-8 BOM,
-// normalize line endings, collapse blank-line runs, and trim leading/trailing blanks.
 func (markdownStrategy) Parse(content []byte) (string, error) {
 	text := string(content)
 	text = strings.TrimPrefix(text, byteOrderMark)
@@ -78,7 +73,6 @@ func (markdownStrategy) Parse(content []byte) (string, error) {
 	return textproc.TrimBlankLines(text), nil
 }
 
-// Chunk splits normalized Markdown into structure-aware chunks.
 func (s markdownStrategy) Chunk(doc storage.Document, text string) ([]storage.Chunk, error) {
 	noteTitle := noteTitleFromPath(doc.AbsolutePath)
 
@@ -90,7 +84,6 @@ func (s markdownStrategy) Chunk(doc storage.Document, text string) ([]storage.Ch
 	return s.buildChunks(parts), nil
 }
 
-// Embed reuses the generic embedder.
 func (s markdownStrategy) Embed(ctx context.Context, chunks []storage.Chunk) ([][]float32, error) {
 	return s.general.Embed(ctx, chunks)
 }
@@ -211,8 +204,6 @@ func (s markdownStrategy) buildChunks(parts []chunkPart) []storage.Chunk {
 
 	return chunks
 }
-
-// --- Markdown-specific stateless helpers (headings, sections, fences) ---
 
 type chunkPart struct {
 	title string

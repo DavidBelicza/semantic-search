@@ -25,12 +25,10 @@ func NewGeneralStrategy(embedder Embedder) GeneralStrategy {
 	return GeneralStrategy{embedder: embedder}
 }
 
-// Claims accepts every file.
 func (GeneralStrategy) Claims(string) bool {
 	return true
 }
 
-// CreateMetadata builds document metadata from the file info.
 func (GeneralStrategy) CreateMetadata(file FileRef) (storage.FileMetadata, error) {
 	absolutePath := filepath.Clean(file.Path)
 	return storage.FileMetadata{
@@ -41,18 +39,15 @@ func (GeneralStrategy) CreateMetadata(file FileRef) (storage.FileMetadata, error
 	}, nil
 }
 
-// Fingerprint hashes the file content.
 func (GeneralStrategy) Fingerprint(content []byte) string {
 	sum := sha256.Sum256(content)
 	return hex.EncodeToString(sum[:])
 }
 
-// Parse treats the bytes as UTF-8 text.
 func (GeneralStrategy) Parse(content []byte) (string, error) {
 	return string(content), nil
 }
 
-// Chunk splits text into fixed token-budget windows.
 func (GeneralStrategy) Chunk(_ storage.Document, text string) ([]storage.Chunk, error) {
 	windows := textproc.HardWindow(text, generalMaxTokens*textproc.DefaultAverageTokenLength)
 
@@ -73,8 +68,6 @@ func (GeneralStrategy) Chunk(_ storage.Document, text string) ([]storage.Chunk, 
 	return chunks, nil
 }
 
-// Embed formats each chunk with the document template and embeds them via the injected
-// embedder, returning one vector per chunk in order.
 func (s GeneralStrategy) Embed(ctx context.Context, chunks []storage.Chunk) ([][]float32, error) {
 	texts := make([]string, len(chunks))
 	for i, chunk := range chunks {

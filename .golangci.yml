@@ -12,8 +12,9 @@ linters:
     - gocognit # cognitive complexity; nesting (incl. loops) compounds the score
     - gocyclo  # cyclomatic complexity
   disable:
-    # Off for now: only flags pre-existing deferred `.Close()` / `tx.Rollback()`
-    # calls in code we are not refactoring. Re-enable when those are cleaned up.
+    # Deliberately off: its findings are almost entirely deferred Close/Rollback and
+    # fmt.Fprint* to stdout, where the error is not actionable. Handling them would add
+    # noise, not safety.
     - errcheck
   settings:
     nestif:
@@ -25,11 +26,12 @@ linters:
       min-complexity: 20
     gocyclo:
       min-complexity: 15
-
-issues:
-  # Grandfather pre-existing findings: only code added or changed after this
-  # baseline commit is checked. Rules apply to new/changed lines, not the legacy
-  # nestif and complexity spots in the original code. Advance this rev once those
-  # are cleaned up if you want full-tree enforcement.
-  new-from-rev: 1e549c6d3ed13e8e17dcf190339fef19921c54ef
-  whole-files: false
+  exclusions:
+    rules:
+      # Test functions accumulate cyclomatic/cognitive complexity from long runs of
+      # sequential assertions, which the complexity metrics are not meant to police.
+      # The flatness rule (nestif) still applies to tests.
+      - path: _test\.go
+        linters:
+          - gocyclo
+          - gocognit

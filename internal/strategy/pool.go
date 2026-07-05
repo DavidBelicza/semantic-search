@@ -10,11 +10,6 @@ func NewPool(strategies ...Strategy) Pool {
 	return Pool{strategies: strategies}
 }
 
-// Strategies returns the pool's strategies in order.
-func (p Pool) Strategies() []Strategy {
-	return p.strategies
-}
-
 // For returns the first strategy that claims the given path.
 func (p Pool) For(path string) (Strategy, bool) {
 	for _, strategy := range p.strategies {

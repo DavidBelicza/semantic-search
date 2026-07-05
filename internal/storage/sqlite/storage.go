@@ -462,11 +462,8 @@ func (s *Store) ApplyDocumentChunkReconcile(ctx context.Context, documentID int6
 	}
 	defer tx.Rollback()
 
-	if len(plan.RemoveIDs) > 0 {
-		query, args := deleteChunksQuery(plan.RemoveIDs)
-		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
-			return nil, err
-		}
+	if err := deleteChunksTx(ctx, tx, plan.RemoveIDs); err != nil {
+		return nil, err
 	}
 
 	updateStmt, err := tx.PrepareContext(ctx, `
@@ -655,6 +652,16 @@ func (s *Store) updateDocument(ctx context.Context, query string, args ...any) e
 	}
 
 	return nil
+}
+
+func deleteChunksTx(ctx context.Context, tx *sql.Tx, chunkIDs []int64) error {
+	if len(chunkIDs) == 0 {
+		return nil
+	}
+
+	query, args := deleteChunksQuery(chunkIDs)
+	_, err := tx.ExecContext(ctx, query, args...)
+	return err
 }
 
 func deleteChunksQuery(chunkIDs []int64) (string, []any) {
