@@ -6,30 +6,33 @@ import (
 	"testing"
 )
 
-func TestNewRootCommandShowsHelp(t *testing.T) {
-	var out bytes.Buffer
-	rootCmd := NewRootCommand(&out, &fakeDocumentStore{}, &fakeVectorStore{})
-	rootCmd.SetArgs([]string{"--help"})
-
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("execute root help: %v", err)
+func TestExecuteShowsHelpWithCommands(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := Execute([]string{"--help"}, &stdout, &stderr); err != nil {
+		t.Fatalf("execute help: %v", err)
 	}
 
-	help := out.String()
+	help := stdout.String()
 	if !strings.Contains(help, appName) {
-		t.Fatalf("help output does not contain app name %q: %q", appName, help)
+		t.Fatalf("help missing app name: %q", help)
 	}
-
-	for _, commandName := range []string{"index", "search"} {
-		if !strings.Contains(help, commandName) {
-			t.Fatalf("help output does not contain %q command: %q", commandName, help)
+	for _, name := range []string{"index", "search", "--db"} {
+		if !strings.Contains(help, name) {
+			t.Fatalf("help missing %q: %q", name, help)
 		}
 	}
+}
 
-	if !strings.Contains(help, "--db") {
-		t.Fatalf("help output does not contain db flag: %q", help)
+func TestExecuteIndexRequiresPath(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := Execute([]string{"index"}, &stdout, &stderr); err == nil {
+		t.Fatal("expected error when index path is missing")
 	}
-	if strings.Contains(help, "--vector") {
-		t.Fatalf("help output contains removed vector flag: %q", help)
+}
+
+func TestExecuteSearchRequiresLimitAndQuery(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := Execute([]string{"search", "only-one-arg"}, &stdout, &stderr); err == nil {
+		t.Fatal("expected error when search args are incomplete")
 	}
 }

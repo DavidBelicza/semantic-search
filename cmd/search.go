@@ -8,16 +8,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"semantic-search/internal/embedder"
 	semanticsearch "semantic-search/pkg"
 )
 
-func NewSearchCommand(out io.Writer, store semanticsearch.SearchMetadataStore, vectorStore semanticsearch.SearchVectorStore) *cobra.Command {
-	return NewSearchCommandWithEmbedder(out, store, vectorStore, defaultQueryEmbedder())
-}
-
-func NewSearchCommandWithEmbedder(out io.Writer, store semanticsearch.SearchMetadataStore, vectorStore semanticsearch.SearchVectorStore, queryEmbedder semanticsearch.QueryEmbedder) *cobra.Command {
-	searchCmd := &cobra.Command{
+func newSearchCommand(databasePath *string) *cobra.Command {
+	return &cobra.Command{
 		Use:   "search [limit] [query]",
 		Short: "Search indexed Markdown content",
 		Args:  cobra.ExactArgs(2),
@@ -27,7 +22,7 @@ func NewSearchCommandWithEmbedder(out io.Writer, store semanticsearch.SearchMeta
 				return fmt.Errorf("invalid limit %q: %w", args[0], err)
 			}
 
-			results, err := semanticsearch.Search(context.Background(), store, vectorStore, queryEmbedder, args[1], limit)
+			results, err := semanticsearch.Search(context.Background(), *databasePath, args[1], limit)
 			if err != nil {
 				return err
 			}
@@ -36,18 +31,6 @@ func NewSearchCommandWithEmbedder(out io.Writer, store semanticsearch.SearchMeta
 			return nil
 		},
 	}
-
-	searchCmd.SetOut(out)
-	searchCmd.SetErr(out)
-
-	return searchCmd
-}
-
-func defaultQueryEmbedder() semanticsearch.QueryEmbedder {
-	queryEmbedder := embedder.NewOpenAIEmbedder(embedder.DefaultBaseURL, embedder.DefaultModel)
-	queryEmbedder.Dimensions = embedder.DefaultDimensions
-	queryEmbedder.Prefix = embedder.QueryPrefix
-	return queryEmbedder
 }
 
 func writeSearchResults(out io.Writer, results []semanticsearch.SearchResult) {

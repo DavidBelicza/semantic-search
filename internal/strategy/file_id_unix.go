@@ -1,6 +1,6 @@
 //go:build unix
 
-package ingest
+package strategy
 
 import (
 	"fmt"

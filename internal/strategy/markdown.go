@@ -11,8 +11,6 @@ import (
 	"github.com/yuin/goldmark/ast"
 	gtext "github.com/yuin/goldmark/text"
 
-	"semantic-search/internal/ingest"
-	"semantic-search/internal/reader"
 	storage "semantic-search/internal/storage/sqlite"
 	"semantic-search/internal/textproc"
 )
@@ -26,80 +24,52 @@ const (
 
 var multipleBlankLines = regexp.MustCompile(`\n{3,}`)
 
-// markdownStrategy handles Markdown files. It reads via the shared generic reader and
-// owns its Markdown-specific parse (normalization) and chunk (structure-aware, heading
-// path) logic. Its configuration (token limits, overlap) is fixed at construction. The
-// chunking steps that use that configuration are methods on this object; only generic,
-// markdown-agnostic primitives are pulled from the textproc package.
+// markdownStrategy handles Markdown files. It composes GeneralStrategy for the generic
+// per-file steps (metadata, fingerprint, embed) and overrides only the Markdown-specific
+// ones: which files it claims, how bytes decode to text (normalization), and how text is
+// chunked (structure-aware, heading path).
 type markdownStrategy struct {
+	general            GeneralStrategy
 	maxTokens          int
 	overlapTokens      int
 	averageTokenLength int
 }
 
-func newMarkdownStrategy(maxTokens int, overlapTokens int) markdownStrategy {
-	if maxTokens <= 0 {
-		maxTokens = defaultMarkdownMaxTokens
-	}
-	if overlapTokens < 0 {
-		overlapTokens = 0
-	}
-
+// NewMarkdownStrategy builds the Markdown strategy over a GeneralStrategy it reuses for
+// the generic steps.
+func NewMarkdownStrategy(general GeneralStrategy) Strategy {
 	return markdownStrategy{
-		maxTokens:          maxTokens,
-		overlapTokens:      overlapTokens,
+		general:            general,
+		maxTokens:          defaultMarkdownMaxTokens,
+		overlapTokens:      defaultOverlapTokens,
 		averageTokenLength: textproc.DefaultAverageTokenLength,
 	}
 }
 
-// NewMarkdownStrategy builds the preconfigured Markdown strategy.
-func NewMarkdownStrategy() Strategy {
-	return newMarkdownStrategy(defaultMarkdownMaxTokens, defaultOverlapTokens)
-}
-
-func (markdownStrategy) Extensions() []string {
-	return []string{".md", ".markdown", ".mdown"}
-}
-
-// Supports reports whether the path's extension is one this strategy handles. It lets the
-// strategy act as its own file filter during Ingest.
-func (s markdownStrategy) Supports(path string) bool {
-	extension := strings.ToLower(filepath.Ext(path))
-	for _, supported := range s.Extensions() {
-		if strings.ToLower(supported) == extension {
-			return true
-		}
+// Claims accepts Markdown files by extension — the strategy's own rule.
+func (markdownStrategy) Claims(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".md", ".markdown", ".mdown":
+		return true
+	default:
+		return false
 	}
-
-	return false
 }
 
-// Discovery walks rootPath and returns the files it finds.
-func (markdownStrategy) Discovery(rootPath string, options ingest.Options) ([]storage.FileMetadata, error) {
-	return ingest.DiscoverFiles(rootPath, options)
+// CreateMetadata reuses the generic metadata build.
+func (s markdownStrategy) CreateMetadata(file FileRef) (storage.FileMetadata, error) {
+	return s.general.CreateMetadata(file)
 }
 
-// Registration records the Markdown files (using this strategy as the file filter) as
-// documents.
-func (s markdownStrategy) Registration(ctx context.Context, store ingest.MetadataStore, files []storage.FileMetadata) error {
-	return ingest.Register(ctx, store, s, files)
+// Fingerprint reuses the generic content hash.
+func (s markdownStrategy) Fingerprint(content []byte) string {
+	return s.general.Fingerprint(content)
 }
 
-// Fingerprinting hashes indexed documents to detect content changes.
-func (markdownStrategy) Fingerprinting(ctx context.Context, store ingest.Store, failFast bool) error {
-	_, err := ingest.FingerprintIndexedDocuments(ctx, store, failFast)
-	return err
-}
-
-// Read uses the shared generic file reader.
-func (markdownStrategy) Read(ctx context.Context, doc storage.Document) (string, error) {
-	return reader.ReadFile(ctx, doc)
-}
-
-// Parse normalizes Markdown text: strip a UTF-8 BOM, normalize line endings, collapse
-// blank-line runs, and trim leading/trailing blank lines. Collapsing blank runs and
-// preserving indentation are Markdown-specific editorial choices, so this lives here.
-func (markdownStrategy) Parse(ctx context.Context, text string) (string, error) {
+// Parse decodes the bytes as Markdown text and normalizes it: strip a UTF-8 BOM,
+// normalize line endings, collapse blank-line runs, and trim leading/trailing blanks.
+func (markdownStrategy) Parse(content []byte) (string, error) {
+	text := string(content)
 	text = strings.TrimPrefix(text, byteOrderMark)
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
@@ -109,7 +79,7 @@ func (markdownStrategy) Parse(ctx context.Context, text string) (string, error) 
 }
 
 // Chunk splits normalized Markdown into structure-aware chunks.
-func (s markdownStrategy) Chunk(ctx context.Context, doc storage.Document, text string) ([]storage.Chunk, error) {
+func (s markdownStrategy) Chunk(doc storage.Document, text string) ([]storage.Chunk, error) {
 	noteTitle := noteTitleFromPath(doc.AbsolutePath)
 
 	var parts []chunkPart
@@ -118,6 +88,11 @@ func (s markdownStrategy) Chunk(ctx context.Context, doc storage.Document, text 
 	}
 
 	return s.buildChunks(parts), nil
+}
+
+// Embed reuses the generic embedder.
+func (s markdownStrategy) Embed(ctx context.Context, chunks []storage.Chunk) ([][]float32, error) {
+	return s.general.Embed(ctx, chunks)
 }
 
 func (s markdownStrategy) avgTokenLen() int {
@@ -259,8 +234,6 @@ type section struct {
 	body string
 }
 
-// sectionTitle is the heading path for a section, or the note name when the section has
-// no heading (a preamble or a headingless note).
 func sectionTitle(path []string, noteTitle string) string {
 	if len(path) > 0 {
 		return strings.Join(path, " > ")

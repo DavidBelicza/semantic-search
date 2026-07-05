@@ -4,14 +4,18 @@ import (
 	"io"
 
 	"github.com/spf13/cobra"
-
-	semanticsearch "semantic-search/pkg"
 )
 
 const appName = "semantic-search"
-const DefaultDatabasePath = "vector-index.db"
+const defaultDatabasePath = "vector-index.db"
 
-func NewRootCommand(out io.Writer, store semanticsearch.AppStore, vectorStore semanticsearch.VectorStore) *cobra.Command {
+// Execute builds the root command and runs it. cmd only parses CLI input and proxies to
+// pkg; it instantiates nothing itself.
+func Execute(args []string, stdout io.Writer, stderr io.Writer) error {
+	return newRootCommand(stdout, stderr, args).Execute()
+}
+
+func newRootCommand(stdout io.Writer, stderr io.Writer, args []string) *cobra.Command {
 	var databasePath string
 
 	rootCmd := &cobra.Command{
@@ -22,11 +26,12 @@ func NewRootCommand(out io.Writer, store semanticsearch.AppStore, vectorStore se
 		},
 	}
 
-	rootCmd.PersistentFlags().StringVar(&databasePath, "db", DefaultDatabasePath, "SQLite database path")
-	rootCmd.SetOut(out)
-	rootCmd.SetErr(out)
-	rootCmd.AddCommand(NewIndexCommand(out, store, vectorStore))
-	rootCmd.AddCommand(NewSearchCommand(out, store, vectorStore))
+	rootCmd.PersistentFlags().StringVar(&databasePath, "db", defaultDatabasePath, "SQLite database path")
+	rootCmd.SetOut(stdout)
+	rootCmd.SetErr(stderr)
+	rootCmd.SetArgs(args)
+	rootCmd.AddCommand(newIndexCommand(&databasePath))
+	rootCmd.AddCommand(newSearchCommand(&databasePath))
 
 	return rootCmd
 }

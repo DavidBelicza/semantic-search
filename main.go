@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 
-	"semantic-search/pkg/app"
+	"semantic-search/cmd"
 )
 
 func main() {
-	if err := app.Run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	if err := cmd.Execute(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

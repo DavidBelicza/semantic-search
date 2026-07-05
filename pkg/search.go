@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"strings"
 
+	"semantic-search/internal/embedder"
 	storage "semantic-search/internal/storage/sqlite"
 	"semantic-search/internal/storage/sqlitevec"
 )
 
-// SearchResult is one chunk match: the document it belongs to, the chunk id, the
-// chunk text, and the score (the vector distance from the query — lower is closer).
+// SearchResult is one chunk match: the document it belongs to, the chunk id, its title
+// and text, and the score (vector distance from the query — lower is closer).
 type SearchResult struct {
 	DocumentID int64
 	ChunkID    int64
@@ -20,29 +21,22 @@ type SearchResult struct {
 	Score      float64
 }
 
-type SearchMetadataStore interface {
+type searchMetadataStore interface {
 	ChunkMetadataByIDs(ctx context.Context, chunkIDs []int64) ([]storage.ChunkMetadata, error)
 }
 
-type SearchVectorStore interface {
+type searchVectorStore interface {
 	Search(ctx context.Context, query []float32, limit int) ([]sqlitevec.VectorHit, error)
 }
 
-// VectorStore is the full vector-store surface used across the commands: chunk
-// deletion and replacement for indexing plus similarity search.
-type VectorStore interface {
-	Delete(ctx context.Context, chunkIDs []int64) error
-	Replace(ctx context.Context, embeddings []storage.ChunkEmbedding) error
-	SearchVectorStore
-}
-
-type QueryEmbedder interface {
+type queryEmbedder interface {
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
 }
 
-// Search embeds the query, retrieves the nearest chunk vectors, and resolves each hit
-// to its document id, chunk id, and text. Results preserve vector-similarity order.
-func Search(ctx context.Context, store SearchMetadataStore, vectorStore SearchVectorStore, queryEmbedder QueryEmbedder, query string, limit int) ([]SearchResult, error) {
+// Search instantiates the stores and query embedder, embeds the query, retrieves the
+// nearest chunk vectors, and resolves each hit to its document, chunk, and text. Results
+// preserve vector-similarity order.
+func Search(ctx context.Context, dbPath string, query string, limit int) ([]SearchResult, error) {
 	if limit <= 0 {
 		return nil, errors.New("limit must be greater than zero")
 	}
@@ -50,7 +44,25 @@ func Search(ctx context.Context, store SearchMetadataStore, vectorStore SearchVe
 		return nil, errors.New("search query is required")
 	}
 
-	vectors, err := queryEmbedder.Embed(ctx, []string{query})
+	store, vectorStore, err := openStores(ctx, dbPath)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+	defer vectorStore.Close()
+
+	return search(ctx, store, vectorStore, newQueryEmbedder(), query, limit)
+}
+
+func newQueryEmbedder() queryEmbedder {
+	e := embedder.NewOpenAIEmbedder(embedder.DefaultBaseURL, embedder.DefaultModel)
+	e.Dimensions = embedder.DefaultDimensions
+	e.Prefix = embedder.QueryPrefix
+	return e
+}
+
+func search(ctx context.Context, store searchMetadataStore, vectorStore searchVectorStore, embedder queryEmbedder, query string, limit int) ([]SearchResult, error) {
+	vectors, err := embedder.Embed(ctx, []string{query})
 	if err != nil {
 		return nil, err
 	}
