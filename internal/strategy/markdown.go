@@ -11,8 +11,8 @@ import (
 	"github.com/yuin/goldmark/ast"
 	gtext "github.com/yuin/goldmark/text"
 
-	storage "semantic-search/internal/storage/sqlite"
-	"semantic-search/internal/textproc"
+	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
 
 const (

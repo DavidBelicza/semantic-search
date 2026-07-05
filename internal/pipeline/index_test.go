@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"semantic-search/internal/pipeline"
-	storage "semantic-search/internal/storage/sqlite"
-	"semantic-search/internal/strategy"
+	"github.com/davidbelicza/semantic-search/internal/pipeline"
+	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/strategy"
 )
 
 func TestIndexDiscoversRegistersAndFingerprints(t *testing.T) {

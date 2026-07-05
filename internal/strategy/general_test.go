@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	storage "semantic-search/internal/storage/sqlite"
+	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
 )
 
 type fakeEmbedder struct {

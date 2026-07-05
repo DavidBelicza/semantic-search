@@ -9,7 +9,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	sqlitemigrations "semantic-search/migrations/sqlite"
+	sqlitemigrations "github.com/davidbelicza/semantic-search/migrations/sqlite"
 )
 
 type Store struct {

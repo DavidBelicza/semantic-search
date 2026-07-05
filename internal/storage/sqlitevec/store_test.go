@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	storage "semantic-search/internal/storage/sqlite"
+	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
 )
 
 func openTestStore(t *testing.T) *Store {

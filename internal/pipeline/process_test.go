@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	storage "semantic-search/internal/storage/sqlite"
-	"semantic-search/internal/strategy"
+	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/strategy"
 )
 
 func writeFile(t *testing.T, content string) string {

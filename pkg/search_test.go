@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	storage "semantic-search/internal/storage/sqlite"
-	"semantic-search/internal/storage/sqlitevec"
+	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/storage/sqlitevec"
 )
 
 type fakeMetadataStore struct {

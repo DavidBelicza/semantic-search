@@ -14,7 +14,7 @@ import (
 	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3"
 
-	storage "semantic-search/internal/storage/sqlite"
+	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
 )
 
 const (

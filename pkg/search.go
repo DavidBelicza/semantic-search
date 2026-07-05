@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"semantic-search/internal/embedder"
-	storage "semantic-search/internal/storage/sqlite"
-	"semantic-search/internal/storage/sqlitevec"
+	"github.com/davidbelicza/semantic-search/internal/embedder"
+	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/storage/sqlitevec"
 )
 
 // SearchResult is one chunk match: the document it belongs to, the chunk id, its title

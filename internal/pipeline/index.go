@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	storage "semantic-search/internal/storage/sqlite"
-	"semantic-search/internal/strategy"
+	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/strategy"
 )
 
 const (

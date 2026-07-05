@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"semantic-search/cmd"
+	"github.com/davidbelicza/semantic-search/cmd"
 )
 
 func main() {

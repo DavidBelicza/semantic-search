@@ -9,7 +9,7 @@ import (
 	"context"
 	"io/fs"
 
-	storage "semantic-search/internal/storage/sqlite"
+	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
 )
 
 // FileRef is the file object the pipeline hands to a strategy: the path plus the already

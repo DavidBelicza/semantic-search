@@ -6,9 +6,9 @@ import (
 	"encoding/hex"
 	"path/filepath"
 
-	"semantic-search/internal/embedder"
-	storage "semantic-search/internal/storage/sqlite"
-	"semantic-search/internal/textproc"
+	"github.com/davidbelicza/semantic-search/internal/embedder"
+	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
 
 const generalMaxTokens = 300

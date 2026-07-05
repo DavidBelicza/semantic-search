@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	semanticsearch "semantic-search/pkg"
+	semanticsearch "github.com/davidbelicza/semantic-search/pkg"
 )
 
 func newIndexCommand(databasePath *string) *cobra.Command {

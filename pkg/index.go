@@ -3,7 +3,7 @@ package semanticsearch
 import (
 	"context"
 
-	"semantic-search/internal/pipeline"
+	"github.com/davidbelicza/semantic-search/internal/pipeline"
 )
 
 // IndexOptions configures an index run.

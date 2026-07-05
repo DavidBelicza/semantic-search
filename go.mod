@@ -1,4 +1,4 @@
-module semantic-search
+module github.com/davidbelicza/semantic-search
 
 go 1.26.4
 
