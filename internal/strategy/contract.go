@@ -26,6 +26,12 @@ type Embedder interface {
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
 }
 
+// PDFTextExtractor extracts plain text from a PDF's raw bytes. It is injected into the PDF
+// strategy so the underlying extraction engine can be swapped without touching the strategy.
+type PDFTextExtractor interface {
+	Extract(content []byte) (string, error)
+}
+
 // Strategy is the whole per-file processing recipe. Every method operates on a single
 // file (or its content); nothing here spans files or touches the database.
 type Strategy interface {

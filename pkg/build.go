@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/davidbelicza/semantic-search/internal/embedder"
+	"github.com/davidbelicza/semantic-search/internal/pdfextract"
 	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
 	"github.com/davidbelicza/semantic-search/internal/storage/sqlitevec"
 	"github.com/davidbelicza/semantic-search/internal/strategy"
@@ -11,30 +12,42 @@ import (
 
 // dependencies is the fully instantiated object graph the pipelines need.
 type dependencies struct {
-	store       *storage.Store
-	vectorStore *sqlitevec.Store
-	pool        strategy.Pool
+	store        *storage.Store
+	vectorStore  *sqlitevec.Store
+	pool         strategy.Pool
+	pdfExtractor *pdfextract.PDFium
 }
 
 // build is the single place that instantiates the whole dependency graph: it opens the
-// stores and composes the strategy pool (embedder → GeneralStrategy → MarkdownStrategy →
-// Pool). The embedder is built here and injected into the strategy, since embedding is a
-// per-file operation the strategy owns.
+// stores and composes the strategy pool (embedder → GeneralStrategy → Markdown/PDF
+// strategies → Pool). The embedder is built here and injected into the strategies, since
+// embedding is a per-file operation the strategy owns.
 func build(ctx context.Context, dbPath string) (dependencies, error) {
 	store, vectorStore, err := openStores(ctx, dbPath)
 	if err != nil {
 		return dependencies{}, err
 	}
 
+	pdfExtractor, err := pdfextract.NewPDFium()
+	if err != nil {
+		store.Close()
+		vectorStore.Close()
+		return dependencies{}, err
+	}
+
 	documentEmbedder := embedder.NewEmbeddingGemma300MQATEmbedder(embedder.DefaultBaseURL)
 	general := strategy.NewGeneralStrategy(documentEmbedder)
 	markdown := strategy.NewMarkdownStrategy(general)
-	pool := strategy.NewPool(markdown)
+	pdf := strategy.NewPDFStrategy(general, pdfExtractor)
+	pool := strategy.NewPool(markdown, pdf)
 
-	return dependencies{store: store, vectorStore: vectorStore, pool: pool}, nil
+	return dependencies{store: store, vectorStore: vectorStore, pool: pool, pdfExtractor: pdfExtractor}, nil
 }
 
 func (d dependencies) close() {
+	if d.pdfExtractor != nil {
+		d.pdfExtractor.Close()
+	}
 	if d.vectorStore != nil {
 		d.vectorStore.Close()
 	}
