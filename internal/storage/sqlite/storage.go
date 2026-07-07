@@ -10,6 +10,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	sqlitemigrations "github.com/davidbelicza/semantic-search/migrations/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
 
 type Store struct {
@@ -38,17 +39,9 @@ type Document struct {
 	EmbeddedContentHash string
 }
 
-type Chunk struct {
-	ID          int64
-	DocumentID  int64
-	ChunkIndex  int
-	Title       string
-	Text        string
-	TokenCount  int
-	StartOffset int
-	EndOffset   int
-	ContentHash string
-}
+// Chunk is defined in textproc — the dependency-free text layer that produces it. The
+// storage layer only persists it; this alias lets storage keep referring to it locally.
+type Chunk = textproc.Chunk
 
 type ChunkEmbedding struct {
 	ChunkID int64

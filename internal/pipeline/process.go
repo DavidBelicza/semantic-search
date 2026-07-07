@@ -145,12 +145,12 @@ func readParseChunk(fileStrategy strategy.Strategy, document storage.Document) (
 		return nil, err
 	}
 
-	text, err := fileStrategy.Parse(content)
+	parsed, err := fileStrategy.Parse(content)
 	if err != nil {
 		return nil, err
 	}
 
-	return fileStrategy.Chunk(document, text)
+	return fileStrategy.Chunk(document, parsed)
 }
 
 // chunksForEmbedding selects which chunks still need vectors. An already-embedded

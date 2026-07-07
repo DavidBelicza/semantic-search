@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -18,7 +17,6 @@ import (
 const (
 	defaultMarkdownMaxTokens = 350
 	defaultOverlapTokens     = 50
-	minBodyTokens            = 32
 	byteOrderMark            = "\uFEFF"
 )
 
@@ -26,8 +24,8 @@ var multipleBlankLines = regexp.MustCompile(`\n{3,}`)
 
 // markdownStrategy handles Markdown files. It composes GeneralStrategy for the generic
 // per-file steps (metadata, fingerprint, embed) and overrides only the Markdown-specific
-// ones: which files it claims, how bytes decode to text (normalization), and how text is
-// chunked (structure-aware, heading path).
+// ones: which files it claims, how bytes decode to structured sections (normalization plus
+// heading splitting), and how those sections are chunked (structure-aware).
 type markdownStrategy struct {
 	general            GeneralStrategy
 	maxTokens          int
@@ -63,25 +61,19 @@ func (s markdownStrategy) Fingerprint(content []byte) string {
 	return s.general.Fingerprint(content)
 }
 
-func (markdownStrategy) Parse(content []byte) (string, error) {
-	text := string(content)
-	text = strings.TrimPrefix(text, byteOrderMark)
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "\n")
-	text = multipleBlankLines.ReplaceAllString(text, "\n\n")
-
-	return textproc.TrimBlankLines(text), nil
+func (markdownStrategy) Parse(content []byte) (textproc.ParsedDocument, error) {
+	return textproc.ParsedDocument{Sections: splitSections(normalizeMarkdown(content))}, nil
 }
 
-func (s markdownStrategy) Chunk(doc storage.Document, text string) ([]storage.Chunk, error) {
-	noteTitle := noteTitleFromPath(doc.AbsolutePath)
-
-	var parts []chunkPart
-	for _, current := range splitSections(text) {
-		parts = append(parts, s.sectionChunks(current, noteTitle)...)
-	}
-
-	return s.buildChunks(parts), nil
+func (s markdownStrategy) Chunk(doc storage.Document, parsed textproc.ParsedDocument) ([]storage.Chunk, error) {
+	return textproc.ChunkSections(parsed.Sections, textproc.SectionChunkConfig{
+		MaxTokens:          s.maxTokens,
+		OverlapTokens:      s.overlapTokens,
+		AverageTokenLength: s.avgTokenLen(),
+		FallbackTitle:      textproc.FileTitleFromPath(doc.AbsolutePath),
+		SplitIntoParts:     splitMarkdownParts,
+		SplitOversized:     s.splitOversized,
+	}), nil
 }
 
 func (s markdownStrategy) Embed(ctx context.Context, chunks []storage.Chunk) ([][]float32, error) {
@@ -96,118 +88,24 @@ func (s markdownStrategy) avgTokenLen() int {
 	return textproc.DefaultAverageTokenLength
 }
 
-func (s markdownStrategy) sectionChunks(sec section, noteTitle string) []chunkPart {
-	title := sectionTitle(sec.path, noteTitle)
-
-	bodyBudget := s.maxTokens - textproc.EstimateTokenCount(title, s.avgTokenLen())
-	if bodyBudget < minBodyTokens {
-		bodyBudget = minBodyTokens
+// splitOversized breaks a part that exceeds the budget into finer parts: fenced code by
+// line, prose by sentence, hard-cut as the floor.
+func (s markdownStrategy) splitOversized(part string, budget int) []string {
+	if isFenced(part) {
+		return textproc.JoinPartsIntoChunks(textproc.NonEmptyLines(part), "\n", budget, s.avgTokenLen(), 0, textproc.HardWindowSplitter(s.avgTokenLen()))
 	}
 
-	bodies := s.applyOverlap(s.packBlocks(splitBlocks(sec.body), bodyBudget))
-
-	parts := make([]chunkPart, len(bodies))
-	for i, body := range bodies {
-		parts[i] = chunkPart{title: title, text: body}
-	}
-
-	return parts
+	return textproc.JoinPartsIntoChunks(textproc.SplitSentences(part), " ", budget, s.avgTokenLen(), 0, textproc.HardWindowSplitter(s.avgTokenLen()))
 }
 
-func (s markdownStrategy) packBlocks(blocks []string, budget int) []string {
-	var parts []string
-	var current []string
-	currentTokens := 0
+func normalizeMarkdown(content []byte) string {
+	text := string(content)
+	text = strings.TrimPrefix(text, byteOrderMark)
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	text = multipleBlankLines.ReplaceAllString(text, "\n\n")
 
-	for _, block := range blocks {
-		blockTokens := textproc.EstimateTokenCount(block, s.avgTokenLen())
-		if blockTokens > budget {
-			parts, current, currentTokens = flushJoined(parts, current, "\n\n")
-			parts = append(parts, s.splitOversized(block, budget)...)
-			continue
-		}
-		if currentTokens+blockTokens > budget {
-			parts, current, currentTokens = flushJoined(parts, current, "\n\n")
-		}
-
-		current = append(current, block)
-		currentTokens += blockTokens
-	}
-
-	parts, _, _ = flushJoined(parts, current, "\n\n")
-	return parts
-}
-
-func (s markdownStrategy) splitOversized(block string, budget int) []string {
-	if isFenced(block) {
-		return s.packUnits(textproc.NonEmptyLines(block), budget, "\n")
-	}
-
-	return s.packUnits(textproc.SplitSentences(block), budget, " ")
-}
-
-func (s markdownStrategy) packUnits(units []string, budget int, separator string) []string {
-	var parts []string
-	var current []string
-	currentTokens := 0
-
-	for _, unit := range units {
-		unitTokens := textproc.EstimateTokenCount(unit, s.avgTokenLen())
-		if unitTokens > budget {
-			parts, current, currentTokens = flushJoined(parts, current, separator)
-			parts = append(parts, textproc.HardWindow(unit, budget*s.avgTokenLen())...)
-			continue
-		}
-		if currentTokens+unitTokens > budget {
-			parts, current, currentTokens = flushJoined(parts, current, separator)
-		}
-
-		current = append(current, unit)
-		currentTokens += unitTokens
-	}
-
-	parts, _, _ = flushJoined(parts, current, separator)
-	return parts
-}
-
-func (s markdownStrategy) applyOverlap(parts []string) []string {
-	if s.overlapTokens <= 0 || len(parts) < 2 {
-		return parts
-	}
-
-	result := make([]string, len(parts))
-	result[0] = parts[0]
-	for i := 1; i < len(parts); i++ {
-		overlap := textproc.TailText(parts[i-1], s.overlapTokens*s.avgTokenLen())
-		result[i] = textproc.JoinOverlap(overlap, parts[i])
-	}
-
-	return result
-}
-
-func (s markdownStrategy) buildChunks(parts []chunkPart) []storage.Chunk {
-	chunks := make([]storage.Chunk, 0, len(parts))
-	offset := 0
-	for _, part := range parts {
-		runeCount := utf8.RuneCountInString(part.text)
-		chunks = append(chunks, storage.Chunk{
-			ChunkIndex:  len(chunks),
-			Title:       part.title,
-			Text:        part.text,
-			TokenCount:  textproc.EstimateTokenCount(part.text, s.avgTokenLen()),
-			StartOffset: offset,
-			EndOffset:   offset + runeCount,
-			ContentHash: textproc.HashText(part.title + "\n" + part.text),
-		})
-		offset += runeCount
-	}
-
-	return chunks
-}
-
-type chunkPart struct {
-	title string
-	text  string
+	return textproc.TrimBlankLines(text)
 }
 
 type headingMark struct {
@@ -215,34 +113,7 @@ type headingMark struct {
 	line  int
 }
 
-type headingEntry struct {
-	level int
-	text  string
-}
-
-type section struct {
-	path []string
-	body string
-}
-
-func sectionTitle(path []string, noteTitle string) string {
-	if len(path) > 0 {
-		return strings.Join(path, " > ")
-	}
-
-	return noteTitle
-}
-
-func noteTitleFromPath(path string) string {
-	if path == "" {
-		return ""
-	}
-
-	base := filepath.Base(path)
-	return strings.TrimSuffix(base, filepath.Ext(base))
-}
-
-func splitSections(source string) []section {
+func splitSections(source string) []textproc.Section {
 	marks := parseHeadings(source)
 	lines := strings.Split(source, "\n")
 	if len(marks) == 0 {
@@ -257,22 +128,22 @@ func splitSections(source string) []section {
 		if body == "" {
 			continue
 		}
-		sections = append(sections, section{path: pathOf(stack), body: body})
+		sections = append(sections, textproc.Section{Path: pathOf(stack), Body: body})
 	}
 
 	return sections
 }
 
-func wholeAsSection(source string) []section {
+func wholeAsSection(source string) []textproc.Section {
 	body := strings.TrimSpace(source)
 	if body == "" {
 		return nil
 	}
 
-	return []section{{body: body}}
+	return []textproc.Section{{Body: body}}
 }
 
-func preambleSection(lines []string, firstHeadingLine int) []section {
+func preambleSection(lines []string, firstHeadingLine int) []textproc.Section {
 	if firstHeadingLine <= 0 {
 		return nil
 	}
@@ -282,7 +153,7 @@ func preambleSection(lines []string, firstHeadingLine int) []section {
 		return nil
 	}
 
-	return []section{{body: body}}
+	return []textproc.Section{{Body: body}}
 }
 
 func sectionEnd(marks []headingMark, index int, lineCount int) int {
@@ -324,29 +195,14 @@ func headingOffset(heading *ast.Heading) int {
 	return lines.At(0).Start
 }
 
-func pushHeading(stack []headingEntry, level int, text string) []headingEntry {
-	for len(stack) > 0 && stack[len(stack)-1].level >= level {
-		stack = stack[:len(stack)-1]
-	}
-
-	return append(stack, headingEntry{level: level, text: text})
-}
-
-func pathOf(stack []headingEntry) []string {
-	path := make([]string, 0, len(stack))
-	for _, entry := range stack {
-		path = append(path, entry.text)
-	}
-
-	return path
-}
-
 func headingTextFromLine(line string) string {
 	return strings.Trim(strings.TrimLeft(line, "#"), " \t#")
 }
 
-func splitBlocks(body string) []string {
-	var blocks []string
+// splitMarkdownParts splits a section body into parts: paragraphs separated by blank lines,
+// with fenced code kept whole as a single part.
+func splitMarkdownParts(body string) []string {
+	var parts []string
 	var current []string
 	inFence := false
 
@@ -361,32 +217,24 @@ func splitBlocks(body string) []string {
 			continue
 		}
 		if strings.TrimSpace(line) == "" {
-			blocks, current = flushBlock(blocks, current)
+			parts, current = flushMarkdownPart(parts, current)
 			continue
 		}
 
 		current = append(current, line)
 	}
 
-	blocks, _ = flushBlock(blocks, current)
-	return blocks
+	parts, _ = flushMarkdownPart(parts, current)
+	return parts
 }
 
-func flushBlock(blocks []string, current []string) ([]string, []string) {
+func flushMarkdownPart(parts []string, current []string) ([]string, []string) {
 	joined := strings.TrimSpace(strings.Join(current, "\n"))
 	if joined == "" {
-		return blocks, nil
+		return parts, nil
 	}
 
-	return append(blocks, joined), nil
-}
-
-func flushJoined(parts []string, current []string, separator string) ([]string, []string, int) {
-	if len(current) == 0 {
-		return parts, nil, 0
-	}
-
-	return append(parts, strings.Join(current, separator)), nil, 0
+	return append(parts, joined), nil
 }
 
 func isFenced(block string) bool {

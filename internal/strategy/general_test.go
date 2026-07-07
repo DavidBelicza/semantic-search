@@ -63,13 +63,21 @@ func TestGeneralStrategyFingerprintHashesContent(t *testing.T) {
 
 func TestGeneralStrategyParseReturnsRawText(t *testing.T) {
 	got, err := NewGeneralStrategy(nil).Parse([]byte("plain text"))
-	if err != nil || got != "plain text" {
-		t.Fatalf("parse mismatch: %q (%v)", got, err)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(got.Sections) != 1 || got.Sections[0].Body != "plain text" {
+		t.Fatalf("parse mismatch: %#v", got)
 	}
 }
 
 func TestGeneralStrategyChunkSplitsByBudget(t *testing.T) {
-	chunks, err := NewGeneralStrategy(nil).Chunk(storage.Document{}, strings.Repeat("x", generalMaxTokens*4*2+1))
+	g := NewGeneralStrategy(nil)
+	parsed, err := g.Parse([]byte(strings.Repeat("x", generalMaxTokens*4*2+1)))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	chunks, err := g.Chunk(storage.Document{}, parsed)
 	if err != nil {
 		t.Fatalf("chunk: %v", err)
 	}

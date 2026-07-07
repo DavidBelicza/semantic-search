@@ -11,6 +11,7 @@ import (
 
 	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
 	"github.com/davidbelicza/semantic-search/internal/strategy"
+	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
 
 func writeFile(t *testing.T, content string) string {
@@ -119,10 +120,16 @@ func (fakeStrategy) Claims(string) bool { return true }
 func (fakeStrategy) CreateMetadata(strategy.FileRef) (storage.FileMetadata, error) {
 	return storage.FileMetadata{}, nil
 }
-func (fakeStrategy) Fingerprint([]byte) string            { return "" }
-func (fakeStrategy) Parse(content []byte) (string, error) { return string(content), nil }
+func (fakeStrategy) Fingerprint([]byte) string { return "" }
+func (fakeStrategy) Parse(content []byte) (textproc.ParsedDocument, error) {
+	return textproc.ParsedDocument{Sections: []textproc.Section{{Body: string(content)}}}, nil
+}
 
-func (s fakeStrategy) Chunk(_ storage.Document, text string) ([]storage.Chunk, error) {
+func (s fakeStrategy) Chunk(_ storage.Document, parsed textproc.ParsedDocument) ([]storage.Chunk, error) {
+	text := ""
+	if len(parsed.Sections) > 0 {
+		text = parsed.Sections[0].Body
+	}
 	runes := []rune(text)
 	var chunks []storage.Chunk
 	for start := 0; start < len(runes); start += s.maxRunes {

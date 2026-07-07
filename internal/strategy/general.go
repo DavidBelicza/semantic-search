@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"path/filepath"
+	"strings"
 
 	"github.com/davidbelicza/semantic-search/internal/embedder"
+	"github.com/davidbelicza/semantic-search/internal/fs"
 	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
 	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
@@ -33,7 +35,7 @@ func (GeneralStrategy) CreateMetadata(file FileRef) (storage.FileMetadata, error
 	absolutePath := filepath.Clean(file.Path)
 	return storage.FileMetadata{
 		AbsolutePath: absolutePath,
-		FileID:       fileID(absolutePath, file.Info),
+		FileID:       fs.FileID(absolutePath, file.Info),
 		SizeBytes:    file.Info.Size(),
 		ModifiedAtNS: file.Info.ModTime().UnixNano(),
 	}, nil
@@ -44,28 +46,30 @@ func (GeneralStrategy) Fingerprint(content []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (GeneralStrategy) Parse(content []byte) (string, error) {
-	return string(content), nil
+func (GeneralStrategy) Parse(content []byte) (textproc.ParsedDocument, error) {
+	return textproc.ParsedDocument{Sections: []textproc.Section{{Body: string(content)}}}, nil
 }
 
-func (GeneralStrategy) Chunk(_ storage.Document, text string) ([]storage.Chunk, error) {
-	windows := textproc.HardWindow(text, generalMaxTokens*textproc.DefaultAverageTokenLength)
+func (GeneralStrategy) Chunk(_ storage.Document, parsed textproc.ParsedDocument) ([]storage.Chunk, error) {
+	windows := textproc.HardWindow(joinSectionBodies(parsed.Sections), generalMaxTokens*textproc.DefaultAverageTokenLength)
 
-	chunks := make([]storage.Chunk, 0, len(windows))
-	offset := 0
-	for _, window := range windows {
-		chunks = append(chunks, storage.Chunk{
-			ChunkIndex:  len(chunks),
-			Text:        window,
-			TokenCount:  textproc.EstimateTokenCount(window, textproc.DefaultAverageTokenLength),
-			StartOffset: offset,
-			EndOffset:   offset + len([]rune(window)),
-			ContentHash: textproc.HashText(window),
-		})
-		offset += len([]rune(window))
+	parts := make([]textproc.ChunkPart, len(windows))
+	for i, window := range windows {
+		parts[i] = textproc.ChunkPart{Text: window}
 	}
 
-	return chunks, nil
+	return textproc.BuildChunks(parts, textproc.DefaultAverageTokenLength), nil
+}
+
+// joinSectionBodies concatenates section bodies into one text. GeneralStrategy is format
+// agnostic, so it chunks the whole document without heading structure.
+func joinSectionBodies(sections []textproc.Section) string {
+	bodies := make([]string, len(sections))
+	for i, section := range sections {
+		bodies[i] = section.Body
+	}
+
+	return strings.Join(bodies, "\n")
 }
 
 func (s GeneralStrategy) Embed(ctx context.Context, chunks []storage.Chunk) ([][]float32, error) {

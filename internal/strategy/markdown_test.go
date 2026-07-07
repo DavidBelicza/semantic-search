@@ -22,18 +22,20 @@ func TestMarkdownStrategyClaimsMarkdownOnly(t *testing.T) {
 	}
 }
 
-func TestMarkdownStrategyParseNormalizes(t *testing.T) {
-	got, err := markdown().Parse([]byte(byteOrderMark + "\r\n\r\n# Title\r\n\r\n\r\n\r\nBody\n\n\n"))
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
+func TestMarkdownNormalizeStripsBOMAndCollapsesBlankLines(t *testing.T) {
+	got := normalizeMarkdown([]byte(byteOrderMark + "\r\n\r\n# Title\r\n\r\n\r\n\r\nBody\n\n\n"))
 	if got != "# Title\n\nBody" {
 		t.Fatalf("normalize mismatch: %q", got)
 	}
 }
 
 func TestMarkdownStrategyChunkSplitsSectionsWithHeadingPath(t *testing.T) {
-	chunks, err := markdown().Chunk(storage.Document{}, "# Guide\n## Payments\nPay the invoice.\n## Refunds\nRefund the payment.")
+	s := markdown()
+	parsed, err := s.Parse([]byte("# Guide\n## Payments\nPay the invoice.\n## Refunds\nRefund the payment."))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	chunks, err := s.Chunk(storage.Document{}, parsed)
 	if err != nil {
 		t.Fatalf("chunk: %v", err)
 	}
@@ -46,9 +48,13 @@ func TestMarkdownStrategyChunkSplitsSectionsWithHeadingPath(t *testing.T) {
 }
 
 func TestMarkdownStrategyChunkIsDeterministic(t *testing.T) {
-	input := "# A\nsome text.\n## B\nmore text.\n\nanother paragraph."
-	first, _ := markdown().Chunk(storage.Document{}, input)
-	second, _ := markdown().Chunk(storage.Document{}, input)
+	s := markdown()
+	parsed, err := s.Parse([]byte("# A\nsome text.\n## B\nmore text.\n\nanother paragraph."))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	first, _ := s.Chunk(storage.Document{}, parsed)
+	second, _ := s.Chunk(storage.Document{}, parsed)
 	if len(first) != len(second) {
 		t.Fatalf("chunk count differs: %d vs %d", len(first), len(second))
 	}
@@ -61,7 +67,11 @@ func TestMarkdownStrategyChunkIsDeterministic(t *testing.T) {
 
 func TestMarkdownStrategyChunkSplitsOversizedSection(t *testing.T) {
 	s := markdownStrategy{general: NewGeneralStrategy(nil), maxTokens: 12, overlapTokens: 0, averageTokenLength: 1}
-	chunks, err := s.Chunk(storage.Document{}, "## S\n"+strings.Repeat("word ", 40))
+	parsed, err := s.Parse([]byte("## S\n" + strings.Repeat("word ", 40)))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	chunks, err := s.Chunk(storage.Document{}, parsed)
 	if err != nil {
 		t.Fatalf("chunk: %v", err)
 	}

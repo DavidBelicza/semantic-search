@@ -10,6 +10,7 @@ import (
 	"io/fs"
 
 	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
 
 // FileRef is the file object the pipeline hands to a strategy: the path plus the already
@@ -26,10 +27,23 @@ type Embedder interface {
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
 }
 
-// PDFTextExtractor extracts plain text from a PDF's raw bytes. It is injected into the PDF
-// strategy so the underlying extraction engine can be swapped without touching the strategy.
+// TextRun is one run of text from a PDF with the font size and position needed to infer
+// structure (headings versus body). FontSize is the rendered size in points; X and Y are
+// the run's left and top position in PDF points (higher Y is higher on the page).
+type TextRun struct {
+	Text     string
+	FontSize float64
+	X        float64
+	Y        float64
+	Page     int
+}
+
+// PDFTextExtractor extracts positioned, font-annotated text runs from a PDF's raw bytes. It
+// is injected into the PDF strategy so the underlying extraction engine can be swapped
+// without touching the strategy. Returning runs (rather than flat text) keeps the
+// heading-inference logic engine-independent.
 type PDFTextExtractor interface {
-	Extract(content []byte) (string, error)
+	ExtractRuns(content []byte) ([]TextRun, error)
 }
 
 // Strategy is the whole per-file processing recipe. Every method operates on a single
@@ -42,11 +56,11 @@ type Strategy interface {
 	CreateMetadata(file FileRef) (storage.FileMetadata, error)
 	// Fingerprint returns a stable hash of the file's content for change detection.
 	Fingerprint(content []byte) string
-	// Parse decodes the file's raw bytes into text (e.g. UTF-8 for text, extraction for
-	// binary formats) and normalizes it.
-	Parse(content []byte) (string, error)
-	// Chunk splits parsed text into chunks.
-	Chunk(doc storage.Document, text string) ([]storage.Chunk, error)
+	// Parse decodes the file's raw bytes into a structured document: normalized text
+	// organized into sections (e.g. by Markdown heading, or by PDF font structure).
+	Parse(content []byte) (textproc.ParsedDocument, error)
+	// Chunk slices a parsed document into chunks, giving each its heading context.
+	Chunk(doc storage.Document, parsed textproc.ParsedDocument) ([]storage.Chunk, error)
 	// Embed turns chunks into vectors, one per chunk, in order.
 	Embed(ctx context.Context, chunks []storage.Chunk) ([][]float32, error)
 }
