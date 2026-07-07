@@ -1,23 +1,25 @@
-package strategy
+package markdown
 
 import (
 	"strings"
 	"testing"
 
 	"github.com/davidbelicza/semantic-search/internal/storage"
+	"github.com/davidbelicza/semantic-search/internal/strategy"
+	"github.com/davidbelicza/semantic-search/internal/strategy/general"
 )
 
-func markdown() Strategy {
-	return NewMarkdownStrategy(NewGeneralStrategy(nil))
+func newMarkdown() strategy.Strategy {
+	return NewMarkdownStrategy(general.NewGeneralStrategy(nil))
 }
 
 func TestMarkdownStrategyClaimsMarkdownOnly(t *testing.T) {
 	for _, path := range []string{"a.md", "a.markdown", "a.mdown", "A.MD"} {
-		if !markdown().Claims(path) {
+		if !newMarkdown().Claims(path) {
 			t.Fatalf("should claim %q", path)
 		}
 	}
-	if markdown().Claims("a.txt") {
+	if newMarkdown().Claims("a.txt") {
 		t.Fatal("should not claim a.txt")
 	}
 }
@@ -30,7 +32,7 @@ func TestMarkdownNormalizeStripsBOMAndCollapsesBlankLines(t *testing.T) {
 }
 
 func TestMarkdownStrategyChunkSplitsSectionsWithHeadingPath(t *testing.T) {
-	s := markdown()
+	s := newMarkdown()
 	parsed, err := s.Parse([]byte("# Guide\n## Payments\nPay the invoice.\n## Refunds\nRefund the payment."))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -48,7 +50,7 @@ func TestMarkdownStrategyChunkSplitsSectionsWithHeadingPath(t *testing.T) {
 }
 
 func TestMarkdownStrategyChunkIsDeterministic(t *testing.T) {
-	s := markdown()
+	s := newMarkdown()
 	parsed, err := s.Parse([]byte("# A\nsome text.\n## B\nmore text.\n\nanother paragraph."))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -66,7 +68,7 @@ func TestMarkdownStrategyChunkIsDeterministic(t *testing.T) {
 }
 
 func TestMarkdownStrategyChunkSplitsOversizedSection(t *testing.T) {
-	s := markdownStrategy{general: NewGeneralStrategy(nil), maxTokens: 12, overlapTokens: 0, averageTokenLength: 1}
+	s := markdownStrategy{GeneralStrategy: general.NewGeneralStrategy(nil), maxTokens: 12, overlapTokens: 0, averageTokenLength: 1}
 	parsed, err := s.Parse([]byte("## S\n" + strings.Repeat("word ", 40)))
 	if err != nil {
 		t.Fatalf("parse: %v", err)

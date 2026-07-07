@@ -1,4 +1,4 @@
-package pdfextract
+package pdf
 
 import (
 	"sync"
@@ -9,8 +9,6 @@ import (
 	"github.com/klippa-app/go-pdfium/requests"
 	"github.com/klippa-app/go-pdfium/responses"
 	"github.com/klippa-app/go-pdfium/webassembly"
-
-	"github.com/davidbelicza/semantic-search/internal/strategy"
 )
 
 const instanceTimeout = 30 * time.Second
@@ -46,7 +44,7 @@ func NewPDFium() (*PDFium, error) {
 }
 
 // ExtractRuns returns every page's text as positioned, font-annotated runs, in page order.
-func (p *PDFium) ExtractRuns(content []byte) ([]strategy.TextRun, error) {
+func (p *PDFium) ExtractRuns(content []byte) ([]TextRun, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -61,7 +59,7 @@ func (p *PDFium) ExtractRuns(content []byte) ([]strategy.TextRun, error) {
 		return nil, err
 	}
 
-	var runs []strategy.TextRun
+	var runs []TextRun
 	for index := 0; index < count.PageCount; index++ {
 		pageRuns, err := p.runsForPage(doc.Document, index)
 		if err != nil {
@@ -73,7 +71,7 @@ func (p *PDFium) ExtractRuns(content []byte) ([]strategy.TextRun, error) {
 	return runs, nil
 }
 
-func (p *PDFium) runsForPage(document references.FPDF_DOCUMENT, index int) ([]strategy.TextRun, error) {
+func (p *PDFium) runsForPage(document references.FPDF_DOCUMENT, index int) ([]TextRun, error) {
 	structured, err := p.instance.GetPageTextStructured(&requests.GetPageTextStructured{
 		Page:                   requests.Page{ByIndex: &requests.PageByIndex{Document: document, Index: index}},
 		Mode:                   requests.GetPageTextStructuredModeRects,
@@ -83,7 +81,7 @@ func (p *PDFium) runsForPage(document references.FPDF_DOCUMENT, index int) ([]st
 		return nil, err
 	}
 
-	runs := make([]strategy.TextRun, 0, len(structured.Rects))
+	runs := make([]TextRun, 0, len(structured.Rects))
 	for _, rect := range structured.Rects {
 		runs = append(runs, runFromRect(rect, index))
 	}
@@ -91,8 +89,8 @@ func (p *PDFium) runsForPage(document references.FPDF_DOCUMENT, index int) ([]st
 	return runs, nil
 }
 
-func runFromRect(rect *responses.GetPageTextStructuredRect, page int) strategy.TextRun {
-	return strategy.TextRun{
+func runFromRect(rect *responses.GetPageTextStructuredRect, page int) TextRun {
+	return TextRun{
 		Text:     rect.Text,
 		FontSize: rectFontSize(rect),
 		X:        rect.PointPosition.Left,

@@ -1,30 +1,36 @@
-package strategy
+package general
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/davidbelicza/semantic-search/internal/storage"
+	"github.com/davidbelicza/semantic-search/internal/strategy"
 	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
 
 const (
-	minBodyTokens = 32
+	defaultMaxTokens     = 350
+	defaultOverlapTokens = 50
+	minBodyTokens        = 32
 	// partSeparator joins a section's parts (paragraphs) back together within a chunk.
 	partSeparator = "\n\n"
 )
 
-// sectionChunkConfig parameterizes how sections become chunks. The format supplies its own
+var blankLineSeparator = regexp.MustCompile(`\n[ \t]*\n`)
+
+// SectionChunkConfig parameterizes how sections become chunks. A format supplies its own
 // budget, overlap, fallback title, part splitter, and oversized-part splitter; joining parts
 // into budgeted chunks is shared (textproc.JoinPartsIntoChunks).
-type sectionChunkConfig struct {
-	maxTokens          int
-	overlapTokens      int
-	averageTokenLength int
-	fallbackTitle      string
-	splitIntoParts     func(body string) []string
-	splitOversized     textproc.OversizedSplitter
+type SectionChunkConfig struct {
+	MaxTokens          int
+	OverlapTokens      int
+	AverageTokenLength int
+	FallbackTitle      string
+	SplitIntoParts     func(body string) []string
+	SplitOversized     textproc.OversizedSplitter
 }
 
 // chunkPart is a titled piece of text on its way to becoming a storage.Chunk.
@@ -33,34 +39,34 @@ type chunkPart struct {
 	text  string
 }
 
-// chunkSections packs every section into chunks and assigns them sequential indices and
-// offsets.
-func chunkSections(sections []textproc.Section, config sectionChunkConfig) []storage.Chunk {
+// ChunkSections packs every section into chunks and assigns them sequential indices and
+// offsets. It is the shared structured-chunking engine the concrete strategies reuse.
+func ChunkSections(sections []strategy.Section, config SectionChunkConfig) []storage.Chunk {
 	var parts []chunkPart
 	for _, section := range sections {
 		parts = append(parts, sectionParts(section, config)...)
 	}
 
-	return buildChunks(parts, config.averageTokenLength)
+	return buildChunks(parts, config.AverageTokenLength)
 }
 
 // sectionParts splits one section's body into titled parts within the token budget, leaving
 // room for the title's own tokens.
-func sectionParts(section textproc.Section, config sectionChunkConfig) []chunkPart {
-	title := sectionTitle(section.Path, config.fallbackTitle)
+func sectionParts(section strategy.Section, config SectionChunkConfig) []chunkPart {
+	title := sectionTitle(section.Path, config.FallbackTitle)
 
-	bodyBudget := config.maxTokens - textproc.EstimateTokenCount(title, config.averageTokenLength)
+	bodyBudget := config.MaxTokens - textproc.EstimateTokenCount(title, config.AverageTokenLength)
 	if bodyBudget < minBodyTokens {
 		bodyBudget = minBodyTokens
 	}
 
 	bodies := textproc.JoinPartsIntoChunks(
-		config.splitIntoParts(section.Body),
+		config.SplitIntoParts(section.Body),
 		partSeparator,
 		bodyBudget,
-		config.averageTokenLength,
-		config.overlapTokens,
-		config.splitOversized,
+		config.AverageTokenLength,
+		config.OverlapTokens,
+		config.SplitOversized,
 	)
 
 	parts := make([]chunkPart, len(bodies))
@@ -103,13 +109,26 @@ func sectionTitle(path []string, fallback string) string {
 	return fallback
 }
 
-// fileTitleFromPath is the file's base name without its extension, used as a chunk title when
+// FileTitleFromPath is the file's base name without its extension, used as a chunk title when
 // no heading structure applies.
-func fileTitleFromPath(path string) string {
+func FileTitleFromPath(path string) string {
 	if path == "" {
 		return ""
 	}
 
 	base := filepath.Base(path)
 	return strings.TrimSuffix(base, filepath.Ext(base))
+}
+
+// splitParagraphs splits a section body into parts: paragraphs separated by blank lines. It
+// is the general (structure-agnostic) part splitter.
+func splitParagraphs(body string) []string {
+	return textproc.NonEmptyTrimmed(blankLineSeparator.Split(body, -1))
+}
+
+// splitOversizedProse breaks a part that exceeds the budget into sentences, hard-cut as the
+// floor.
+func splitOversizedProse(part string, budget int) []string {
+	avg := textproc.DefaultAverageTokenLength
+	return textproc.JoinPartsIntoChunks(textproc.SplitSentences(part), " ", budget, avg, 0, textproc.HardWindowSplitter(avg))
 }

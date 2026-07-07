@@ -10,6 +10,8 @@ import (
 	"github.com/davidbelicza/semantic-search/internal/storage"
 	"github.com/davidbelicza/semantic-search/internal/storage/sqlite"
 	"github.com/davidbelicza/semantic-search/internal/strategy"
+	"github.com/davidbelicza/semantic-search/internal/strategy/general"
+	"github.com/davidbelicza/semantic-search/internal/strategy/markdown"
 )
 
 func TestIndexDiscoversRegistersAndFingerprints(t *testing.T) {
@@ -38,7 +40,7 @@ func TestIndexDiscoversRegistersAndFingerprints(t *testing.T) {
 		t.Fatalf("schema: %v", err)
 	}
 
-	pool := strategy.NewPool(strategy.NewMarkdownStrategy(strategy.NewGeneralStrategy(nil)))
+	pool := strategy.NewPool(markdown.NewMarkdownStrategy(general.NewGeneralStrategy(nil)))
 	if err := pipeline.Index(context.Background(), store, pool, root, pipeline.Options{}, false); err != nil {
 		t.Fatalf("index: %v", err)
 	}

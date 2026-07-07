@@ -11,7 +11,6 @@ import (
 
 	"github.com/davidbelicza/semantic-search/internal/storage"
 	"github.com/davidbelicza/semantic-search/internal/strategy"
-	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
 
 func writeFile(t *testing.T, content string) string {
@@ -121,11 +120,11 @@ func (fakeStrategy) CreateMetadata(strategy.FileRef) (storage.FileMetadata, erro
 	return storage.FileMetadata{}, nil
 }
 func (fakeStrategy) Fingerprint([]byte) string { return "" }
-func (fakeStrategy) Parse(content []byte) (textproc.ParsedDocument, error) {
-	return textproc.ParsedDocument{Sections: []textproc.Section{{Body: string(content)}}}, nil
+func (fakeStrategy) Parse(content []byte) (strategy.ParsedDocument, error) {
+	return strategy.ParsedDocument{Sections: []strategy.Section{{Body: string(content)}}}, nil
 }
 
-func (s fakeStrategy) Chunk(_ storage.Document, parsed textproc.ParsedDocument) ([]storage.Chunk, error) {
+func (s fakeStrategy) Chunk(_ storage.Document, parsed strategy.ParsedDocument) ([]storage.Chunk, error) {
 	text := ""
 	if len(parsed.Sections) > 0 {
 		text = parsed.Sections[0].Body

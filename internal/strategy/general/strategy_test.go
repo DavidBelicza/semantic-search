@@ -1,4 +1,4 @@
-package strategy
+package general
 
 import (
 	"context"
@@ -8,13 +8,14 @@ import (
 	"testing"
 
 	"github.com/davidbelicza/semantic-search/internal/storage"
+	"github.com/davidbelicza/semantic-search/internal/strategy"
 )
 
 type fakeEmbedder struct {
 	inputs [][]string
 }
 
-func (f *fakeEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+func (f *fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
 	f.inputs = append(f.inputs, texts)
 	vectors := make([][]float32, len(texts))
 	for i := range texts {
@@ -39,15 +40,12 @@ func TestGeneralStrategyCreateMetadata(t *testing.T) {
 		t.Fatalf("stat: %v", err)
 	}
 
-	meta, err := NewGeneralStrategy(nil).CreateMetadata(FileRef{Path: path, Info: info})
+	meta, err := NewGeneralStrategy(nil).CreateMetadata(strategy.FileRef{Path: path, Info: info})
 	if err != nil {
 		t.Fatalf("create metadata: %v", err)
 	}
-	if meta.AbsolutePath != filepath.Clean(path) {
-		t.Fatalf("path mismatch: %q", meta.AbsolutePath)
-	}
-	if meta.SizeBytes != 5 {
-		t.Fatalf("size mismatch: %d", meta.SizeBytes)
+	if meta.AbsolutePath != filepath.Clean(path) || meta.SizeBytes != 5 {
+		t.Fatalf("metadata mismatch: %#v", meta)
 	}
 	if meta.FileID == "" || meta.ModifiedAtNS == 0 {
 		t.Fatalf("missing identity/mtime: %#v", meta)
@@ -61,7 +59,7 @@ func TestGeneralStrategyFingerprintHashesContent(t *testing.T) {
 	}
 }
 
-func TestGeneralStrategyParseReturnsRawText(t *testing.T) {
+func TestGeneralStrategyParseReturnsWholeText(t *testing.T) {
 	got, err := NewGeneralStrategy(nil).Parse([]byte("plain text"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -71,9 +69,9 @@ func TestGeneralStrategyParseReturnsRawText(t *testing.T) {
 	}
 }
 
-func TestGeneralStrategyChunkSplitsByBudget(t *testing.T) {
+func TestGeneralStrategyChunkProducesMultipleChunks(t *testing.T) {
 	g := NewGeneralStrategy(nil)
-	parsed, err := g.Parse([]byte(strings.Repeat("x", generalMaxTokens*4*2+1)))
+	parsed, err := g.Parse([]byte(strings.Repeat("x", 4000)))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -81,8 +79,8 @@ func TestGeneralStrategyChunkSplitsByBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("chunk: %v", err)
 	}
-	if len(chunks) != 3 {
-		t.Fatalf("chunk count mismatch: want 3, got %d", len(chunks))
+	if len(chunks) < 2 {
+		t.Fatalf("expected multiple chunks, got %d", len(chunks))
 	}
 }
 

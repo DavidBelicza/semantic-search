@@ -1,4 +1,4 @@
-package strategy
+package pdf
 
 import (
 	"math"
@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/davidbelicza/semantic-search/internal/strategy"
 	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
 
@@ -21,7 +22,6 @@ const (
 )
 
 var (
-	blankLineSeparator     = regexp.MustCompile(`\n[ \t]*\n`)
 	hyphenatedLineBreak    = regexp.MustCompile(`(\p{L})-\n(\p{Ll})`)
 	headerFooterMinRepeats = 2
 )
@@ -36,10 +36,10 @@ type textLine struct {
 	text     string
 }
 
-// buildSectionsFromRuns turns positioned PDF text runs into sections: it drops repeated
-// page headers/footers, groups runs into reading-ordered lines, detects the body font size,
-// and splits the lines into sections at font-size-based headings.
-func buildSectionsFromRuns(runs []TextRun) []textproc.Section {
+// buildSectionsFromRuns turns positioned PDF text runs into sections: it drops repeated page
+// headers/footers, groups runs into reading-ordered lines, detects the body font size, and
+// splits the lines into sections at font-size-based headings.
+func buildSectionsFromRuns(runs []TextRun) []strategy.Section {
 	lines := groupRunsIntoLines(runs)
 	lines = stripRepeatedHeadersAndFooters(lines)
 	sortLinesIntoReadingOrder(lines)
@@ -147,8 +147,8 @@ func sortLinesIntoReadingOrder(lines []textLine) {
 	})
 }
 
-// detectBodyFontSize returns the font size most of the text is set in (weighted by
-// character count) — the baseline that headings stand out from.
+// detectBodyFontSize returns the font size most of the text is set in (weighted by character
+// count) — the baseline that headings stand out from.
 func detectBodyFontSize(lines []textLine) float64 {
 	weight := map[float64]int{}
 	for _, line := range lines {
@@ -169,17 +169,17 @@ func detectBodyFontSize(lines []textLine) float64 {
 
 // assembleSections walks the ordered lines, opening a new section at each heading and
 // accumulating the lines between headings as that section's body.
-func assembleSections(lines []textLine, baseline float64) []textproc.Section {
+func assembleSections(lines []textLine, baseline float64) []strategy.Section {
 	levels := headingLevelsBySize(lines, baseline)
 
-	var sections []textproc.Section
-	var stack []headingEntry
+	var sections []strategy.Section
+	var stack []textproc.HeadingEntry
 	var body []string
 
 	flush := func() {
 		joined := joinHyphenatedLineBreaks(strings.TrimSpace(strings.Join(body, "\n")))
 		if joined != "" {
-			sections = append(sections, textproc.Section{Path: pathOf(stack), Body: joined})
+			sections = append(sections, strategy.Section{Path: textproc.PathOf(stack), Body: joined})
 		}
 		body = nil
 	}
@@ -191,7 +191,7 @@ func assembleSections(lines []textLine, baseline float64) []textproc.Section {
 			continue
 		}
 		flush()
-		stack = pushHeading(stack, level, line.text)
+		stack = textproc.PushHeading(stack, level, line.text)
 	}
 	flush()
 
@@ -228,11 +228,6 @@ func headingLevelsBySize(lines []textLine, baseline float64) map[float64]int {
 // joinHyphenatedLineBreaks rejoins words split across a line break by a hyphen.
 func joinHyphenatedLineBreaks(text string) string {
 	return hyphenatedLineBreak.ReplaceAllString(text, "$1$2")
-}
-
-// splitParagraphs splits a section body into parts: paragraphs separated by blank lines.
-func splitParagraphs(body string) []string {
-	return textproc.NonEmptyTrimmed(blankLineSeparator.Split(body, -1))
 }
 
 func roundFontSize(size float64) float64 {

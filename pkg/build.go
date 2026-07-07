@@ -4,10 +4,12 @@ import (
 	"context"
 
 	"github.com/davidbelicza/semantic-search/internal/embedder"
-	"github.com/davidbelicza/semantic-search/internal/pdfextract"
 	"github.com/davidbelicza/semantic-search/internal/storage/sqlite"
 	"github.com/davidbelicza/semantic-search/internal/storage/sqlitevec"
 	"github.com/davidbelicza/semantic-search/internal/strategy"
+	"github.com/davidbelicza/semantic-search/internal/strategy/general"
+	"github.com/davidbelicza/semantic-search/internal/strategy/markdown"
+	"github.com/davidbelicza/semantic-search/internal/strategy/pdf"
 )
 
 // dependencies is the fully instantiated object graph the pipelines need.
@@ -15,7 +17,7 @@ type dependencies struct {
 	store        *sqlite.Store
 	vectorStore  *sqlitevec.Store
 	pool         strategy.Pool
-	pdfExtractor *pdfextract.PDFium
+	pdfExtractor *pdf.PDFium
 }
 
 // build is the single place that instantiates the whole dependency graph: it opens the
@@ -28,7 +30,7 @@ func build(ctx context.Context, dbPath string) (dependencies, error) {
 		return dependencies{}, err
 	}
 
-	pdfExtractor, err := pdfextract.NewPDFium()
+	pdfExtractor, err := pdf.NewPDFium()
 	if err != nil {
 		store.Close()
 		vectorStore.Close()
@@ -36,10 +38,10 @@ func build(ctx context.Context, dbPath string) (dependencies, error) {
 	}
 
 	documentEmbedder := embedder.NewEmbeddingGemma300MQATEmbedder(embedder.DefaultBaseURL)
-	general := strategy.NewGeneralStrategy(documentEmbedder)
-	markdown := strategy.NewMarkdownStrategy(general)
-	pdf := strategy.NewPDFStrategy(general, pdfExtractor)
-	pool := strategy.NewPool(markdown, pdf)
+	base := general.NewGeneralStrategy(documentEmbedder)
+	markdownStrategy := markdown.NewMarkdownStrategy(base)
+	pdfStrategy := pdf.NewPDFStrategy(base, pdfExtractor)
+	pool := strategy.NewPool(markdownStrategy, pdfStrategy)
 
 	return dependencies{store: store, vectorStore: vectorStore, pool: pool, pdfExtractor: pdfExtractor}, nil
 }

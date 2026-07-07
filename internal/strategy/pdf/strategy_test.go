@@ -1,4 +1,4 @@
-package strategy
+package pdf
 
 import (
 	"errors"
@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/davidbelicza/semantic-search/internal/storage"
+	"github.com/davidbelicza/semantic-search/internal/strategy/general"
 )
 
 type fakePDFExtractor struct {
@@ -18,7 +19,7 @@ func (f fakePDFExtractor) ExtractRuns([]byte) ([]TextRun, error) {
 }
 
 func TestPDFStrategyClaimsOnlyPDF(t *testing.T) {
-	s := NewPDFStrategy(NewGeneralStrategy(nil), fakePDFExtractor{})
+	s := NewPDFStrategy(general.NewGeneralStrategy(nil), fakePDFExtractor{})
 
 	if !s.Claims("report.PDF") {
 		t.Fatal("expected report.PDF to be claimed (case-insensitive)")
@@ -29,7 +30,7 @@ func TestPDFStrategyClaimsOnlyPDF(t *testing.T) {
 }
 
 func TestPDFStrategyParseBuildsSectionsFromRuns(t *testing.T) {
-	s := NewPDFStrategy(NewGeneralStrategy(nil), fakePDFExtractor{runs: []TextRun{
+	s := NewPDFStrategy(general.NewGeneralStrategy(nil), fakePDFExtractor{runs: []TextRun{
 		{Text: "Findings", FontSize: 20, X: 10, Y: 700, Page: 0},
 		{Text: "The patient is stable.", FontSize: 10, X: 10, Y: 680, Page: 0},
 	}})
@@ -51,7 +52,7 @@ func TestPDFStrategyParseBuildsSectionsFromRuns(t *testing.T) {
 
 func TestPDFStrategyParsePropagatesExtractorError(t *testing.T) {
 	wantErr := errors.New("boom")
-	s := NewPDFStrategy(NewGeneralStrategy(nil), fakePDFExtractor{err: wantErr})
+	s := NewPDFStrategy(general.NewGeneralStrategy(nil), fakePDFExtractor{err: wantErr})
 
 	if _, err := s.Parse([]byte("%PDF-1.7")); !errors.Is(err, wantErr) {
 		t.Fatalf("expected extractor error to propagate, got %v", err)
@@ -59,7 +60,7 @@ func TestPDFStrategyParsePropagatesExtractorError(t *testing.T) {
 }
 
 func TestPDFStrategyImageOnlyYieldsNoChunks(t *testing.T) {
-	s := NewPDFStrategy(NewGeneralStrategy(nil), fakePDFExtractor{runs: nil})
+	s := NewPDFStrategy(general.NewGeneralStrategy(nil), fakePDFExtractor{runs: nil})
 
 	parsed, err := s.Parse([]byte("%PDF-1.7"))
 	if err != nil {
@@ -75,8 +76,6 @@ func TestPDFStrategyImageOnlyYieldsNoChunks(t *testing.T) {
 }
 
 func TestBuildSectionsFromRunsOrdersByDescendingTop(t *testing.T) {
-	// Body run given before the heading and lower on the page; reading order must place the
-	// heading (higher Top) first so the body falls under it.
 	sections := buildSectionsFromRuns([]TextRun{
 		{Text: "under the heading", FontSize: 10, X: 10, Y: 500, Page: 0},
 		{Text: "Diagnosis", FontSize: 18, X: 10, Y: 520, Page: 0},
@@ -91,7 +90,6 @@ func TestBuildSectionsFromRunsOrdersByDescendingTop(t *testing.T) {
 }
 
 func TestBuildSectionsFromRunsStripsRepeatedHeadersAndFooters(t *testing.T) {
-	// The same footer text at the same position on two pages should be dropped.
 	sections := buildSectionsFromRuns([]TextRun{
 		{Text: "Clinic Footer", FontSize: 8, X: 10, Y: 30, Page: 0},
 		{Text: "page one body text here", FontSize: 10, X: 10, Y: 400, Page: 0},
