@@ -10,48 +10,11 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	sqlitemigrations "github.com/davidbelicza/semantic-search/migrations/sqlite"
-	"github.com/davidbelicza/semantic-search/internal/textproc"
+	storage "github.com/davidbelicza/semantic-search/internal/storage"
 )
 
 type Store struct {
 	db *sql.DB
-}
-
-const (
-	DocumentStatusIndexed  = "indexed"
-	DocumentStatusScanned  = "scanned"
-	DocumentStatusChunked  = "chunked"
-	DocumentStatusEmbedded = "embedded"
-)
-
-type Document struct {
-	ID                  int64
-	FileID              string
-	AbsolutePath        string
-	FileSize            int64
-	ModifiedAtNS        int64
-	ContentHash         string
-	HasHash             bool
-	ScannedFileSize     int64
-	ScannedModifiedAtNS int64
-	HasScannedMetadata  bool
-	Status              string
-	EmbeddedContentHash string
-}
-
-// Chunk is defined in textproc — the dependency-free text layer that produces it. The
-// storage layer only persists it; this alias lets storage keep referring to it locally.
-type Chunk = textproc.Chunk
-
-type ChunkEmbedding struct {
-	ChunkID int64
-	Vector  []float32
-}
-
-type ChunkReconcilePlan struct {
-	Keep      []Chunk
-	Insert    []Chunk
-	RemoveIDs []int64
 }
 
 func Open(path string) (*Store, error) {
@@ -239,7 +202,7 @@ func (s *Store) documentsNeedStatusMigration(ctx context.Context) (bool, error) 
 	return strings.Contains(createSQL, "'done'") || strings.Contains(createSQL, "'failed'"), nil
 }
 
-func (s *Store) UpsertDocuments(ctx context.Context, files []FileMetadata) error {
+func (s *Store) UpsertDocuments(ctx context.Context, files []storage.FileMetadata) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -289,7 +252,7 @@ ON CONFLICT(file_id) DO UPDATE SET
 	return tx.Commit()
 }
 
-func (s *Store) DocumentsByStatus(ctx context.Context, status string, afterID int64, limit int) ([]Document, error) {
+func (s *Store) DocumentsByStatus(ctx context.Context, status string, afterID int64, limit int) ([]storage.Document, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, file_id, absolute_path, file_size, modified_at_ns, content_hash, scanned_file_size, scanned_modified_at_ns, status, embedded_content_hash
 FROM documents
@@ -301,9 +264,9 @@ LIMIT ?`, status, afterID, limit)
 	}
 	defer rows.Close()
 
-	var documents []Document
+	var documents []storage.Document
 	for rows.Next() {
-		var document Document
+		var document storage.Document
 		var contentHash sql.NullString
 		var scannedFileSize sql.NullInt64
 		var scannedModifiedAtNS sql.NullInt64
@@ -392,42 +355,7 @@ WHERE file_id = ?`
 	return s.updateDocument(ctx, query, status, fileID)
 }
 
-func ReconcileChunks(existing []Chunk, incoming []Chunk) ChunkReconcilePlan {
-	available := make(map[string][]Chunk)
-	for _, chunk := range existing {
-		available[chunk.ContentHash] = append(available[chunk.ContentHash], chunk)
-	}
-
-	var plan ChunkReconcilePlan
-	keptIDs := make(map[int64]struct{})
-	for _, chunk := range incoming {
-		candidates := available[chunk.ContentHash]
-		if len(candidates) == 0 {
-			plan.Insert = append(plan.Insert, chunk)
-			continue
-		}
-
-		existingChunk := candidates[0]
-		available[chunk.ContentHash] = candidates[1:]
-		chunk.ID = existingChunk.ID
-		chunk.DocumentID = existingChunk.DocumentID
-		plan.Keep = append(plan.Keep, chunk)
-		keptIDs[existingChunk.ID] = struct{}{}
-	}
-
-	for _, chunk := range existing {
-		if chunk.ID == 0 {
-			continue
-		}
-		if _, ok := keptIDs[chunk.ID]; !ok {
-			plan.RemoveIDs = append(plan.RemoveIDs, chunk.ID)
-		}
-	}
-
-	return plan
-}
-
-func moveKeptChunksToTemporaryIndexes(ctx context.Context, tx *sql.Tx, documentID int64, kept []Chunk) error {
+func moveKeptChunksToTemporaryIndexes(ctx context.Context, tx *sql.Tx, documentID int64, kept []storage.Chunk) error {
 	if len(kept) == 0 {
 		return nil
 	}
@@ -448,7 +376,7 @@ func moveKeptChunksToTemporaryIndexes(ctx context.Context, tx *sql.Tx, documentI
 	return nil
 }
 
-func (s *Store) ApplyDocumentChunkReconcile(ctx context.Context, documentID int64, plan ChunkReconcilePlan) ([]Chunk, error) {
+func (s *Store) ApplyDocumentChunkReconcile(ctx context.Context, documentID int64, plan storage.ChunkReconcilePlan) ([]storage.Chunk, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -516,7 +444,7 @@ INSERT INTO chunks (
 	}
 	defer stmt.Close()
 
-	inserted := make([]Chunk, 0, len(plan.Insert))
+	inserted := make([]storage.Chunk, 0, len(plan.Insert))
 	for _, chunk := range plan.Insert {
 		result, err := stmt.ExecContext(
 			ctx,
@@ -549,14 +477,7 @@ INSERT INTO chunks (
 	return inserted, nil
 }
 
-type ChunkMetadata struct {
-	ChunkID    int64
-	DocumentID int64
-	Title      string
-	Text       string
-}
-
-func (s *Store) ChunkMetadataByIDs(ctx context.Context, chunkIDs []int64) ([]ChunkMetadata, error) {
+func (s *Store) ChunkMetadataByIDs(ctx context.Context, chunkIDs []int64) ([]storage.ChunkMetadata, error) {
 	if len(chunkIDs) == 0 {
 		return nil, nil
 	}
@@ -568,9 +489,9 @@ func (s *Store) ChunkMetadataByIDs(ctx context.Context, chunkIDs []int64) ([]Chu
 	}
 	defer rows.Close()
 
-	var metadata []ChunkMetadata
+	var metadata []storage.ChunkMetadata
 	for rows.Next() {
-		var item ChunkMetadata
+		var item storage.ChunkMetadata
 		if err := rows.Scan(&item.ChunkID, &item.DocumentID, &item.Title, &item.Text); err != nil {
 			return nil, err
 		}
@@ -594,7 +515,7 @@ func chunkMetadataQuery(chunkIDs []int64) (string, []any) {
 	return "SELECT id, document_id, title, text FROM chunks WHERE id IN (" + strings.Join(placeholders, ", ") + ")", args
 }
 
-func (s *Store) ChunksByDocumentID(ctx context.Context, documentID int64) ([]Chunk, error) {
+func (s *Store) ChunksByDocumentID(ctx context.Context, documentID int64) ([]storage.Chunk, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, document_id, chunk_index, title, text, token_count, start_offset, end_offset, content_hash
 FROM chunks
@@ -605,9 +526,9 @@ ORDER BY chunk_index`, documentID)
 	}
 	defer rows.Close()
 
-	var chunks []Chunk
+	var chunks []storage.Chunk
 	for rows.Next() {
-		var chunk Chunk
+		var chunk storage.Chunk
 		if err := rows.Scan(
 			&chunk.ID,
 			&chunk.DocumentID,

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/storage"
 	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
 
@@ -51,13 +51,13 @@ func (s pdfStrategy) Parse(content []byte) (textproc.ParsedDocument, error) {
 }
 
 func (s pdfStrategy) Chunk(doc storage.Document, parsed textproc.ParsedDocument) ([]storage.Chunk, error) {
-	return textproc.ChunkSections(parsed.Sections, textproc.SectionChunkConfig{
-		MaxTokens:          pdfMaxTokens,
-		OverlapTokens:      pdfOverlapTokens,
-		AverageTokenLength: textproc.DefaultAverageTokenLength,
-		FallbackTitle:      textproc.FileTitleFromPath(doc.AbsolutePath),
-		SplitIntoParts:     splitParagraphs,
-		SplitOversized:     pdfSplitOversized,
+	return chunkSections(parsed.Sections, sectionChunkConfig{
+		maxTokens:          pdfMaxTokens,
+		overlapTokens:      pdfOverlapTokens,
+		averageTokenLength: textproc.DefaultAverageTokenLength,
+		fallbackTitle:      fileTitleFromPath(doc.AbsolutePath),
+		splitIntoParts:     splitParagraphs,
+		splitOversized:     pdfSplitOversized,
 	}), nil
 }
 

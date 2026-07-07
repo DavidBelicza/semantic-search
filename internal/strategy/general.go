@@ -9,7 +9,7 @@ import (
 
 	"github.com/davidbelicza/semantic-search/internal/embedder"
 	"github.com/davidbelicza/semantic-search/internal/fs"
-	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/storage"
 	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
 
@@ -53,12 +53,12 @@ func (GeneralStrategy) Parse(content []byte) (textproc.ParsedDocument, error) {
 func (GeneralStrategy) Chunk(_ storage.Document, parsed textproc.ParsedDocument) ([]storage.Chunk, error) {
 	windows := textproc.HardWindow(joinSectionBodies(parsed.Sections), generalMaxTokens*textproc.DefaultAverageTokenLength)
 
-	parts := make([]textproc.ChunkPart, len(windows))
+	parts := make([]chunkPart, len(windows))
 	for i, window := range windows {
-		parts[i] = textproc.ChunkPart{Text: window}
+		parts[i] = chunkPart{text: window}
 	}
 
-	return textproc.BuildChunks(parts, textproc.DefaultAverageTokenLength), nil
+	return buildChunks(parts, textproc.DefaultAverageTokenLength), nil
 }
 
 // joinSectionBodies concatenates section bodies into one text. GeneralStrategy is format

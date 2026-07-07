@@ -7,7 +7,8 @@ import (
 	"testing"
 
 	"github.com/davidbelicza/semantic-search/internal/pipeline"
-	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/storage"
+	"github.com/davidbelicza/semantic-search/internal/storage/sqlite"
 	"github.com/davidbelicza/semantic-search/internal/strategy"
 )
 
@@ -28,7 +29,7 @@ func TestIndexDiscoversRegistersAndFingerprints(t *testing.T) {
 		}
 	}
 
-	store, err := storage.Open(dbPath)
+	store, err := sqlite.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/davidbelicza/semantic-search/internal/embedder"
-	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/storage"
 	"github.com/davidbelicza/semantic-search/internal/storage/sqlitevec"
 )
 

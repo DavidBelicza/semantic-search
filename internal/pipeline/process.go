@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/storage"
 	"github.com/davidbelicza/semantic-search/internal/strategy"
 )
 

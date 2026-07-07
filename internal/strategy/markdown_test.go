@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/storage"
 )
 
 func markdown() Strategy {

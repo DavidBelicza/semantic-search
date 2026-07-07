@@ -5,14 +5,14 @@ import (
 
 	"github.com/davidbelicza/semantic-search/internal/embedder"
 	"github.com/davidbelicza/semantic-search/internal/pdfextract"
-	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/storage/sqlite"
 	"github.com/davidbelicza/semantic-search/internal/storage/sqlitevec"
 	"github.com/davidbelicza/semantic-search/internal/strategy"
 )
 
 // dependencies is the fully instantiated object graph the pipelines need.
 type dependencies struct {
-	store        *storage.Store
+	store        *sqlite.Store
 	vectorStore  *sqlitevec.Store
 	pool         strategy.Pool
 	pdfExtractor *pdfextract.PDFium
@@ -58,8 +58,8 @@ func (d dependencies) close() {
 
 // openStores opens and prepares the SQLite metadata store and the sqlite-vec vector store,
 // both backed by the same database file.
-func openStores(ctx context.Context, dbPath string) (*storage.Store, *sqlitevec.Store, error) {
-	store, err := storage.Open(dbPath)
+func openStores(ctx context.Context, dbPath string) (*sqlite.Store, *sqlitevec.Store, error) {
+	store, err := sqlite.Open(dbPath)
 	if err != nil {
 		return nil, nil, err
 	}

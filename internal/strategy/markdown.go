@@ -10,7 +10,7 @@ import (
 	"github.com/yuin/goldmark/ast"
 	gtext "github.com/yuin/goldmark/text"
 
-	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/storage"
 	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
 
@@ -66,13 +66,13 @@ func (markdownStrategy) Parse(content []byte) (textproc.ParsedDocument, error) {
 }
 
 func (s markdownStrategy) Chunk(doc storage.Document, parsed textproc.ParsedDocument) ([]storage.Chunk, error) {
-	return textproc.ChunkSections(parsed.Sections, textproc.SectionChunkConfig{
-		MaxTokens:          s.maxTokens,
-		OverlapTokens:      s.overlapTokens,
-		AverageTokenLength: s.avgTokenLen(),
-		FallbackTitle:      textproc.FileTitleFromPath(doc.AbsolutePath),
-		SplitIntoParts:     splitMarkdownParts,
-		SplitOversized:     s.splitOversized,
+	return chunkSections(parsed.Sections, sectionChunkConfig{
+		maxTokens:          s.maxTokens,
+		overlapTokens:      s.overlapTokens,
+		averageTokenLength: s.avgTokenLen(),
+		fallbackTitle:      fileTitleFromPath(doc.AbsolutePath),
+		splitIntoParts:     splitMarkdownParts,
+		splitOversized:     s.splitOversized,
 	}), nil
 }
 

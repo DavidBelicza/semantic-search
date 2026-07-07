@@ -4,6 +4,8 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+
+	"github.com/davidbelicza/semantic-search/internal/storage"
 )
 
 func TestEnsureSchemaCreatesDocumentsTable(t *testing.T) {
@@ -80,11 +82,11 @@ VALUES ('1:100', '/tmp/docs/README.md', 10, 100, 'hash', 10, 100, 'done')`); err
 	if err := store.db.QueryRowContext(ctx, "SELECT status FROM documents WHERE file_id = '1:100'").Scan(&status); err != nil {
 		t.Fatalf("query migrated status: %v", err)
 	}
-	if status != DocumentStatusIndexed {
+	if status != storage.DocumentStatusIndexed {
 		t.Fatalf("status mismatch: want indexed, got %q", status)
 	}
 
-	if _, err := store.db.ExecContext(ctx, "UPDATE documents SET status = ? WHERE file_id = '1:100'", DocumentStatusEmbedded); err != nil {
+	if _, err := store.db.ExecContext(ctx, "UPDATE documents SET status = ? WHERE file_id = '1:100'", storage.DocumentStatusEmbedded); err != nil {
 		t.Fatalf("new embedded status should satisfy migrated constraint: %v", err)
 	}
 }
@@ -143,7 +145,7 @@ VALUES ('1:100', '/tmp/docs/README.md', 10, 100, 'hash', 10, 100, 'scanned')`); 
 		t.Fatalf("mark embedded: %v", err)
 	}
 
-	documents, err := store.DocumentsByStatus(ctx, DocumentStatusEmbedded, 0, 10)
+	documents, err := store.DocumentsByStatus(ctx, storage.DocumentStatusEmbedded, 0, 10)
 	if err != nil {
 		t.Fatalf("documents by status: %v", err)
 	}
@@ -163,7 +165,7 @@ func TestApplyDocumentChunkReconcileSwapsKeptChunkIndexesWithoutUniqueViolation(
 	if err := store.EnsureSchema(ctx); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
-	if err := store.UpsertDocuments(ctx, []FileMetadata{{
+	if err := store.UpsertDocuments(ctx, []storage.FileMetadata{{
 		FileID:       "1:100",
 		AbsolutePath: filepath.Clean("/tmp/docs/note.md"),
 		SizeBytes:    2,
@@ -177,7 +179,7 @@ func TestApplyDocumentChunkReconcileSwapsKeptChunkIndexesWithoutUniqueViolation(
 		t.Fatalf("load document id: %v", err)
 	}
 
-	initial := ChunkReconcilePlan{Insert: []Chunk{
+	initial := storage.ChunkReconcilePlan{Insert: []storage.Chunk{
 		{ChunkIndex: 0, Text: "A", TokenCount: 1, StartOffset: 0, EndOffset: 1, ContentHash: "hash-a"},
 		{ChunkIndex: 1, Text: "B", TokenCount: 1, StartOffset: 1, EndOffset: 2, ContentHash: "hash-b"},
 	}}
@@ -190,11 +192,11 @@ func TestApplyDocumentChunkReconcileSwapsKeptChunkIndexesWithoutUniqueViolation(
 		t.Fatalf("load chunks: %v", err)
 	}
 
-	incoming := []Chunk{
+	incoming := []storage.Chunk{
 		{ChunkIndex: 0, Text: "B", TokenCount: 1, StartOffset: 0, EndOffset: 1, ContentHash: "hash-b"},
 		{ChunkIndex: 1, Text: "A", TokenCount: 1, StartOffset: 1, EndOffset: 2, ContentHash: "hash-a"},
 	}
-	plan := ReconcileChunks(existing, incoming)
+	plan := storage.ReconcileChunks(existing, incoming)
 	if len(plan.Keep) != 2 || len(plan.Insert) != 0 || len(plan.RemoveIDs) != 0 {
 		t.Fatalf("expected a pure reorder plan, got %#v", plan)
 	}
@@ -224,35 +226,35 @@ func TestUpsertDocumentsInsertsAndUpdatesInBatch(t *testing.T) {
 		t.Fatalf("ensure schema: %v", err)
 	}
 
-	first := FileMetadata{
+	first := storage.FileMetadata{
 		FileID:       "1:100",
 		AbsolutePath: filepath.Clean("/tmp/docs/README.md"),
 		SizeBytes:    10,
 		ModifiedAtNS: 100,
 	}
-	second := FileMetadata{
+	second := storage.FileMetadata{
 		FileID:       "1:200",
 		AbsolutePath: filepath.Clean("/tmp/docs/notes/plan.md"),
 		SizeBytes:    20,
 		ModifiedAtNS: 200,
 	}
 
-	if err := store.UpsertDocuments(ctx, []FileMetadata{first, second}); err != nil {
+	if err := store.UpsertDocuments(ctx, []storage.FileMetadata{first, second}); err != nil {
 		t.Fatalf("insert documents: %v", err)
 	}
 
-	if err := store.UpdateDocumentStatus(ctx, second.FileID, DocumentStatusEmbedded); err != nil {
+	if err := store.UpdateDocumentStatus(ctx, second.FileID, storage.DocumentStatusEmbedded); err != nil {
 		t.Fatalf("mark second embedded: %v", err)
 	}
 
-	if err := store.UpsertDocuments(ctx, []FileMetadata{first, second}); err != nil {
+	if err := store.UpsertDocuments(ctx, []storage.FileMetadata{first, second}); err != nil {
 		t.Fatalf("upsert unchanged documents: %v", err)
 	}
 
 	first.SizeBytes = 15
 	first.ModifiedAtNS = 150
 	first.AbsolutePath = filepath.Clean("/tmp/docs/README-renamed.md")
-	if err := store.UpsertDocuments(ctx, []FileMetadata{first}); err != nil {
+	if err := store.UpsertDocuments(ctx, []storage.FileMetadata{first}); err != nil {
 		t.Fatalf("update document: %v", err)
 	}
 
@@ -297,13 +299,13 @@ ORDER BY file_id`)
 	if got["1:100"].absolutePath != first.AbsolutePath || got["1:100"].size != 15 || got["1:100"].modifiedNS != 150 {
 		t.Fatalf("first document was not updated: %#v", got["1:100"])
 	}
-	if got["1:100"].status != DocumentStatusIndexed {
+	if got["1:100"].status != storage.DocumentStatusIndexed {
 		t.Fatalf("first document status mismatch: want indexed, got %q", got["1:100"].status)
 	}
 	if got["1:200"].size != 20 {
 		t.Fatalf("second document changed unexpectedly: %#v", got["1:200"])
 	}
-	if got["1:200"].status != DocumentStatusEmbedded {
+	if got["1:200"].status != storage.DocumentStatusEmbedded {
 		t.Fatalf("second document status mismatch: want embedded, got %q", got["1:200"].status)
 	}
 }
@@ -317,17 +319,17 @@ func TestDocumentsByStatusAndScanUpdates(t *testing.T) {
 		t.Fatalf("ensure schema: %v", err)
 	}
 
-	file := FileMetadata{
+	file := storage.FileMetadata{
 		FileID:       "1:100",
 		AbsolutePath: filepath.Clean("/tmp/docs/README.md"),
 		SizeBytes:    10,
 		ModifiedAtNS: 100,
 	}
-	if err := store.UpsertDocuments(ctx, []FileMetadata{file}); err != nil {
+	if err := store.UpsertDocuments(ctx, []storage.FileMetadata{file}); err != nil {
 		t.Fatalf("insert document: %v", err)
 	}
 
-	documents, err := store.DocumentsByStatus(ctx, DocumentStatusIndexed, 0, 10)
+	documents, err := store.DocumentsByStatus(ctx, storage.DocumentStatusIndexed, 0, 10)
 	if err != nil {
 		t.Fatalf("documents by status: %v", err)
 	}
@@ -339,11 +341,11 @@ func TestDocumentsByStatusAndScanUpdates(t *testing.T) {
 	}
 
 	const wantHash = "abc123"
-	if err := store.UpdateDocumentContentHashAndStatus(ctx, file.FileID, wantHash, DocumentStatusScanned); err != nil {
+	if err := store.UpdateDocumentContentHashAndStatus(ctx, file.FileID, wantHash, storage.DocumentStatusScanned); err != nil {
 		t.Fatalf("update content hash and status: %v", err)
 	}
 
-	documents, err = store.DocumentsByStatus(ctx, DocumentStatusScanned, 0, 10)
+	documents, err = store.DocumentsByStatus(ctx, storage.DocumentStatusScanned, 0, 10)
 	if err != nil {
 		t.Fatalf("documents by scanned status: %v", err)
 	}
@@ -351,11 +353,11 @@ func TestDocumentsByStatusAndScanUpdates(t *testing.T) {
 		t.Fatalf("scanned document mismatch: %#v", documents)
 	}
 
-	if err := store.UpdateDocumentScanCheckpointAndStatus(ctx, file.FileID, DocumentStatusEmbedded); err != nil {
+	if err := store.UpdateDocumentScanCheckpointAndStatus(ctx, file.FileID, storage.DocumentStatusEmbedded); err != nil {
 		t.Fatalf("update scan checkpoint and status: %v", err)
 	}
 
-	documents, err = store.DocumentsByStatus(ctx, DocumentStatusEmbedded, 0, 10)
+	documents, err = store.DocumentsByStatus(ctx, storage.DocumentStatusEmbedded, 0, 10)
 	if err != nil {
 		t.Fatalf("documents by embedded status: %v", err)
 	}
@@ -373,17 +375,17 @@ func TestApplyDocumentChunkReconcileKeepsInsertsAndDeletes(t *testing.T) {
 		t.Fatalf("ensure schema: %v", err)
 	}
 
-	file := FileMetadata{
+	file := storage.FileMetadata{
 		FileID:       "1:100",
 		AbsolutePath: filepath.Clean("/tmp/docs/README.md"),
 		SizeBytes:    10,
 		ModifiedAtNS: 100,
 	}
-	if err := store.UpsertDocuments(ctx, []FileMetadata{file}); err != nil {
+	if err := store.UpsertDocuments(ctx, []storage.FileMetadata{file}); err != nil {
 		t.Fatalf("insert document: %v", err)
 	}
 
-	documents, err := store.DocumentsByStatus(ctx, DocumentStatusIndexed, 0, 1)
+	documents, err := store.DocumentsByStatus(ctx, storage.DocumentStatusIndexed, 0, 1)
 	if err != nil {
 		t.Fatalf("documents by status: %v", err)
 	}
@@ -391,11 +393,11 @@ func TestApplyDocumentChunkReconcileKeepsInsertsAndDeletes(t *testing.T) {
 		t.Fatalf("document count mismatch: want 1, got %d", len(documents))
 	}
 
-	chunks := []Chunk{
+	chunks := []storage.Chunk{
 		{ChunkIndex: 0, Text: "hello", TokenCount: 2, StartOffset: 0, EndOffset: 5, ContentHash: "hash-1"},
 		{ChunkIndex: 1, Text: "world", TokenCount: 2, StartOffset: 5, EndOffset: 10, ContentHash: "hash-2"},
 	}
-	initialPlan := ReconcileChunks(nil, chunks)
+	initialPlan := storage.ReconcileChunks(nil, chunks)
 	inserted, err := store.ApplyDocumentChunkReconcile(ctx, documents[0].ID, initialPlan)
 	if err != nil {
 		t.Fatalf("apply initial chunks: %v", err)
@@ -417,11 +419,11 @@ func TestApplyDocumentChunkReconcileKeepsInsertsAndDeletes(t *testing.T) {
 		t.Fatalf("load existing chunks: %v", err)
 	}
 
-	nextChunks := []Chunk{
+	nextChunks := []storage.Chunk{
 		{ChunkIndex: 0, Text: "hello", TokenCount: 2, StartOffset: 0, EndOffset: 5, ContentHash: "hash-1"},
 		{ChunkIndex: 1, Text: "new", TokenCount: 1, StartOffset: 5, EndOffset: 8, ContentHash: "hash-3"},
 	}
-	plan := ReconcileChunks(existing, nextChunks)
+	plan := storage.ReconcileChunks(existing, nextChunks)
 	if len(plan.Keep) != 1 || plan.Keep[0].ID != existing[0].ID {
 		t.Fatalf("kept chunks mismatch: %#v", plan.Keep)
 	}
@@ -448,18 +450,18 @@ func TestApplyDocumentChunkReconcileKeepsInsertsAndDeletes(t *testing.T) {
 }
 
 func TestReconcileChunksHandlesDuplicateContentHashesByOccurrence(t *testing.T) {
-	existing := []Chunk{
+	existing := []storage.Chunk{
 		{ID: 10, DocumentID: 42, ChunkIndex: 0, ContentHash: "same"},
 		{ID: 11, DocumentID: 42, ChunkIndex: 1, ContentHash: "same"},
 		{ID: 12, DocumentID: 42, ChunkIndex: 2, ContentHash: "removed"},
 	}
-	incoming := []Chunk{
+	incoming := []storage.Chunk{
 		{ChunkIndex: 0, ContentHash: "same"},
 		{ChunkIndex: 1, ContentHash: "same"},
 		{ChunkIndex: 2, ContentHash: "new"},
 	}
 
-	plan := ReconcileChunks(existing, incoming)
+	plan := storage.ReconcileChunks(existing, incoming)
 
 	if len(plan.Keep) != 2 || plan.Keep[0].ID != 10 || plan.Keep[1].ID != 11 {
 		t.Fatalf("kept duplicate chunks mismatch: %#v", plan.Keep)

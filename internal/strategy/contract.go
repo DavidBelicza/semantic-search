@@ -9,7 +9,7 @@ import (
 	"context"
 	"io/fs"
 
-	storage "github.com/davidbelicza/semantic-search/internal/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/internal/storage"
 	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
 
