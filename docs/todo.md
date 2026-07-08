@@ -22,27 +22,6 @@ Status: **done** / **todo** (partial = base exists, needs wiring).
 | EPUB | `.epub` | P3 | todo | stdlib `archive/zip` + `golang.org/x/net/html`; alt `github.com/taylorskalyo/goreader` |
 | Subtitles | `.srt`, `.vtt`, `.ass`, `.ssa` | P3 | todo | stdlib (`.srt`/`.vtt`); `github.com/asticode/go-astisub` (`.ssa`/`.ass`/`.ttml` too) |
 
-## Notes
-
-- **General / plain text** and **Code** and **Config** are all UTF-8 text, so they reuse the
-  base structured chunker; the main work is choosing which extensions to claim (avoid
-  minified bundles, lock files, generated output). Code is a *separate* strategy so it can
-  later chunk by structure (functions/blocks) instead of paragraphs.
-- **DOCX / XLSX / PPTX / EPUB** are all ZIP + XML — pure-Go extraction with the standard
-  library is possible; a third-party library mainly saves fiddly parsing.
-- **Tabular formats (CSV, TSV, XLSX)** need a row-as-record representation: detect the header
-  row and prefix each row's cells with their column names, or the embeddings carry no
-  meaning. Value is high for text-rich sheets, low for number-heavy ones.
-- **Heading-aware formats** (HTML `h1–h6`, DOCX heading styles) map cleanly onto the existing
-  section/heading-path model and reuse `textproc.PushHeading`/`PathOf`.
-- **Purity of dependencies** — every *primary* candidate above is pure Go, so no format add
-  requires a native/CGO or external-binary dependency. The only non-pure-Go options are
-  optional or alternates: `go-tree-sitter` (CGO, only if we want structure-aware code
-  chunking) and `sajari/docconv` (shells out to external CLIs; not needed since stdlib
-  handles DOCX). `go-pdfium` is already used in its pure-Go WebAssembly mode. Note this is
-  about the *format* layer only — the storage layer already uses CGO (`mattn/go-sqlite3` and
-  the sqlite-vec bindings), so the binary is not CGO-free regardless.
-
 ## Out of scope (for now)
 
 - **Legacy binary office** (`.doc`, `.xls`, `.ppt`) — OLE binary, no good pure-Go reader.
@@ -50,3 +29,37 @@ Status: **done** / **todo** (partial = base exists, needs wiring).
 - **Images and scanned PDFs** — need OCR (e.g. Tesseract): a real feature with a heavy
   dependency and variable quality, not a format add.
 - **Audio / video** — transcription; out of scope for a file indexer.
+
+# Library API — refactor roadmap
+
+Turn the project into a library-first API. The packages a consumer needs to name or extend
+move **whole** from `internal/` to a public `core/` tree — no aliases, and no package is split
+(a package either stays entirely in `internal/` or moves entirely to `core/`). The interfaces
+then live in their natural domain packages (`core/strategy`, `core/storage`, `core/embedder`),
+imported directly. A root `semanticsearch` facade provides the convenience layer (`Engine` +
+constructors); its strategy constructors are factories, so `NewEngine` injects the embedder
+into each strategy under the hood — `Embed` and `Claims` stay on the Strategy interface.
+Phase 1 unlocks injection; Phase 2 adds implementations behind the same interfaces.
+
+Package moves (each moved as a whole unit):
+
+- **→ `core/`:** `embedder`, `storage`, `strategy` (with all subpackages)
+- **stay in `internal/`:** `fs`, `pipeline`, `textproc` — plumbing users never name; the public
+  `core/*` packages may still import them (a public package importing an internal one in the
+  same module is legal).
+
+| Step | Change | Phase | Status |
+|---|---|---|---|
+| Move to core | Move whole packages `internal/{embedder,storage,strategy}` → `core/{embedder,storage,strategy}`; update import paths; `internal/{fs,pipeline,textproc}` stay | 1 | todo |
+| Store interfaces | Define `Storage` (metadata/chunks) and `VectorStorage` interfaces in `core/storage` from the current sqlite/sqlitevec methods; pipeline depends on the interfaces, not concrete stores | 1 | todo |
+| Embedder injection | Facade strategy constructors are factories; `NewEngine` builds each strategy with the injected embedder (`general.NewGeneralStrategy(embedder)`), keeping `Embed` and `Claims` unchanged | 1 | todo |
+| Embedder API | `NewAiEmbedder(AiEmbedderConfig{Standard, BaseURL, Model, Dimensions})` with typed `StandardOpenAI` const | 1 | todo |
+| Dup validation | Facade constructors carry each built-in's extensions (custom strategies supply their own); `NewEngine` errors on duplicate extensions | 1 | todo |
+| Store constructors | Per-type: `NewSQLiteStorage(path)`, `NewSQLiteVectorStorage(path)` (returning `core/storage` interfaces) | 1 | todo |
+| Strategy constructors | Factories: `NewMarkdownStrategy()`, `NewPDFStrategy()`, `NewCodeStrategy()`, `NewDocxStrategy()`, `NewTextStrategy()` | 1 | todo |
+| Facade | Root `semanticsearch` package absorbs `pkg/`: `Index`/`Search` become `Engine` methods, `build.go` wiring splits into `NewEngine` + the constructors, and `IndexOptions`/`SearchResult` move here. Consumers import `core/*` directly for interfaces (no aliases) | 1 | todo |
+| Remove CLI | After `pkg/` logic has migrated to the facade, delete `pkg/`, `cmd/`, `main.go`; drop cobra / pflag / mousetrap from `go.mod` | 1 | todo |
+| E2E tests | Replace the CLI harness: deterministic e2e (fake embedder) + live e2e (real server, env-gated) | 1 | todo |
+| Postgres store | `core/storage/postgres` implementing `Storage` (CGO-free path when sqlite isn't imported) | 2 | todo |
+| pgvector | `VectorStorage` on pgvector; document split-DB (metadata and vectors in separate databases) | 2 | todo |
+| More embedders | Additional `Standard` values behind `NewAiEmbedder` (e.g. Cohere) | 2 | todo |
