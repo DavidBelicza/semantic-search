@@ -15,11 +15,48 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     env:
       CGO_ENABLED: "1"
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install sqlite headers (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./...
+
+  build-test-windows:
+    name: Build & Test (windows-latest)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      # The sqlite-vec bindings #include "sqlite3.h", which Windows has no system
+      # copy of. MSYS2 provides both the gcc cgo needs and the sqlite3 headers.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-sqlite3
 
       - uses: actions/setup-go@v5
         with:
