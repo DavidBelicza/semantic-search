@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"path/filepath"
+	"strings"
 
 	"github.com/davidbelicza/semantic-search/internal/embedder"
 	"github.com/davidbelicza/semantic-search/internal/fs"
@@ -16,9 +17,10 @@ import (
 	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
 
-// GeneralStrategy claims every file, builds metadata from file info, hashes content, treats
-// bytes as UTF-8 text in a single section, chunks that structure-agnostically (paragraphs
-// with overlap), and embeds via the injected embedder.
+// GeneralStrategy claims plain-text files, builds metadata from file info, hashes content,
+// treats bytes as UTF-8 text in a single section, chunks that structure-agnostically
+// (paragraphs with overlap), and embeds via the injected embedder. Markdown and PDF embed it
+// for these generic per-file steps and override Claims/Parse/Chunk for their format.
 type GeneralStrategy struct {
 	embedder strategy.Embedder
 }
@@ -27,8 +29,15 @@ func NewGeneralStrategy(embedder strategy.Embedder) GeneralStrategy {
 	return GeneralStrategy{embedder: embedder}
 }
 
-func (GeneralStrategy) Claims(string) bool {
-	return true
+// Claims reports whether the path is a plain-text file this strategy handles. It is a fixed
+// whitelist, not a catch-all: unknown extensions are left for other strategies (or skipped).
+func (GeneralStrategy) Claims(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".txt", ".text", ".log", ".rst", ".org", ".adoc":
+		return true
+	default:
+		return false
+	}
 }
 
 func (GeneralStrategy) CreateMetadata(file strategy.FileRef) (storage.FileMetadata, error) {
@@ -47,7 +56,7 @@ func (GeneralStrategy) Fingerprint(content []byte) string {
 }
 
 func (GeneralStrategy) Parse(content []byte) (strategy.ParsedDocument, error) {
-	return strategy.ParsedDocument{Sections: []strategy.Section{{Body: string(content)}}}, nil
+	return strategy.ParsedDocument{Sections: []strategy.Section{{Body: textproc.NormalizeText(content)}}}, nil
 }
 
 func (GeneralStrategy) Chunk(doc storage.Document, parsed strategy.ParsedDocument) ([]storage.Chunk, error) {

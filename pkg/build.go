@@ -41,7 +41,7 @@ func build(ctx context.Context, dbPath string) (dependencies, error) {
 	base := general.NewGeneralStrategy(documentEmbedder)
 	markdownStrategy := markdown.NewMarkdownStrategy(base)
 	pdfStrategy := pdf.NewPDFStrategy(base, pdfExtractor)
-	pool := strategy.NewPool(markdownStrategy, pdfStrategy)
+	pool := strategy.NewPool(markdownStrategy, pdfStrategy, base)
 
 	return dependencies{store: store, vectorStore: vectorStore, pool: pool, pdfExtractor: pdfExtractor}, nil
 }

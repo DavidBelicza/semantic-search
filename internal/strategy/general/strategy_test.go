@@ -24,9 +24,19 @@ func (f *fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float32, er
 	return vectors, nil
 }
 
-func TestGeneralStrategyClaimsEverything(t *testing.T) {
-	if !NewGeneralStrategy(nil).Claims("/tmp/anything.bin") {
-		t.Fatal("general strategy should claim every file")
+func TestGeneralStrategyClaimsPlainText(t *testing.T) {
+	s := NewGeneralStrategy(nil)
+
+	for _, path := range []string{"/tmp/note.txt", "/tmp/a.text", "/tmp/run.log", "/tmp/doc.rst", "/tmp/notes.org", "/tmp/page.adoc", "/tmp/UPPER.TXT"} {
+		if !s.Claims(path) {
+			t.Fatalf("general strategy should claim plain-text file %q", path)
+		}
+	}
+
+	for _, path := range []string{"/tmp/anything.bin", "/tmp/page.md", "/tmp/doc.pdf", "/tmp/noext"} {
+		if s.Claims(path) {
+			t.Fatalf("general strategy should not claim non-plain-text file %q", path)
+		}
 	}
 }
 

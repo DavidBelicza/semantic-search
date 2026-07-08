@@ -24,13 +24,6 @@ func TestMarkdownStrategyClaimsMarkdownOnly(t *testing.T) {
 	}
 }
 
-func TestMarkdownNormalizeStripsBOMAndCollapsesBlankLines(t *testing.T) {
-	got := normalizeMarkdown([]byte(byteOrderMark + "\r\n\r\n# Title\r\n\r\n\r\n\r\nBody\n\n\n"))
-	if got != "# Title\n\nBody" {
-		t.Fatalf("normalize mismatch: %q", got)
-	}
-}
-
 func TestMarkdownStrategyChunkSplitsSectionsWithHeadingPath(t *testing.T) {
 	s := newMarkdown()
 	parsed, err := s.Parse([]byte("# Guide\n## Payments\nPay the invoice.\n## Refunds\nRefund the payment."))

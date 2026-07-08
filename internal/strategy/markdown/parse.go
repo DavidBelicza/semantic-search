@@ -1,7 +1,6 @@
 package markdown
 
 import (
-	"regexp"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -11,20 +10,6 @@ import (
 	"github.com/davidbelicza/semantic-search/internal/strategy"
 	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
-
-const byteOrderMark = "\uFEFF"
-
-var multipleBlankLines = regexp.MustCompile(`\n{3,}`)
-
-func normalizeMarkdown(content []byte) string {
-	text := string(content)
-	text = strings.TrimPrefix(text, byteOrderMark)
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	text = strings.ReplaceAll(text, "\r", "\n")
-	text = multipleBlankLines.ReplaceAllString(text, "\n\n")
-
-	return textproc.TrimBlankLines(text)
-}
 
 type headingMark struct {
 	level int

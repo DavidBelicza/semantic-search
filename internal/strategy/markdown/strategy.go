@@ -49,7 +49,7 @@ func (markdownStrategy) Claims(path string) bool {
 }
 
 func (markdownStrategy) Parse(content []byte) (strategy.ParsedDocument, error) {
-	return strategy.ParsedDocument{Sections: splitSections(normalizeMarkdown(content))}, nil
+	return strategy.ParsedDocument{Sections: splitSections(textproc.NormalizeText(content))}, nil
 }
 
 func (s markdownStrategy) Chunk(doc storage.Document, parsed strategy.ParsedDocument) ([]storage.Chunk, error) {
