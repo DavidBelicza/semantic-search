@@ -17,6 +17,7 @@ internal/strategy    the per-file contract (Strategy interface) + Pool; concrete
                        strategy/general   base structured strategy + chunking engine
                        strategy/markdown  Markdown parsing/chunking
                        strategy/pdf       PDF parsing (PDFium) + font-based sections
+                       strategy/code      code parsing (Chroma lexer) + definition sections
 internal/storage     resource entities (Document, Chunk, …); no database code
   storage/sqlite     documents + chunks tables (source of truth)
   storage/sqlitevec  sqlite-vec vectors
@@ -47,7 +48,7 @@ Embed(ctx, chunks) ([][]float32, error)
 `Parse` produces a `ParsedDocument` — the file's sections, each a heading path plus body.
 `Chunk` slices those sections into chunks, so every chunk carries its heading context.
 
-- **`general.GeneralStrategy`** — the base structured strategy: claims everything,
+- **`general.GeneralStrategy`** — the base structured strategy: claims plain-text extensions,
   stat→metadata, hash, one section from the whole text, structured chunking (it owns the
   shared `ChunkSections` engine), embed via the injected embedder.
 - **`markdown`** — overrides `Claims` (extension), `Parse` (goldmark headings → sections),
@@ -55,8 +56,12 @@ Embed(ctx, chunks) ([][]float32, error)
 - **`pdf`** — overrides `Claims` and `Parse` (PDFium extracts font-annotated runs; headings
   are inferred from font size). It inherits chunking, metadata, fingerprint, and embed.
   See [research/pdf-extraction-engine.md](research/pdf-extraction-engine.md).
+- **`code`** — overrides `Claims` (code extensions, minus minified/generated files), `Parse`
+  (normalize + guard), and `Chunk` (a Chroma lexer finds definition boundaries by token
+  category — pure Go, no CGO — one section per function/class, titled with its nesting path).
+  See [chunking.md](chunking.md).
 
-Markdown and PDF **embed** `GeneralStrategy` (Go composition, not inheritance), reusing its
+Markdown, PDF, and Code **embed** `GeneralStrategy` (Go composition, not inheritance), reusing its
 methods without proxy code and overriding only what their format needs. The embedder is
 injected, because embedding is a per-file operation the strategy owns. A `Pool` holds the
 strategies; `Pool.For(path)` returns the first that claims a file.

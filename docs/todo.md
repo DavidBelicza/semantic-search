@@ -13,7 +13,7 @@ Status: **done** / **todo** (partial = base exists, needs wiring).
 | Markdown | `.md`, `.markdown`, `.mdown` | — | done | `github.com/yuin/goldmark` (in use) |
 | PDF | `.pdf` | — | done | `github.com/klippa-app/go-pdfium` (in use) |
 | General / plain text | `.txt`, `.text`, `.log`, `.rst`, `.org`, `.adoc` | — | done | stdlib only (base strategy; plain-text `Claims` set, pool wiring, shared `textproc.NormalizeText`) |
-| Code | `.go`, `.js`, `.ts`, `.jsx`, `.tsx`, `.py`, `.php`, `.java`, `.rb`, `.rs`, `.c`, `.h`, `.cpp`, `.hpp`, `.cs`, `.sh`, `.sql` | P1 | todo | stdlib (v1, line/paragraph chunking); `github.com/smacker/go-tree-sitter` (optional, structure-aware — **CGO**) |
+| Code | `.go`, `.js`, `.ts`, `.jsx`, `.tsx`, `.py`, `.php`, `.java`, `.rb`, `.rs`, `.c`, `.h`, `.cpp`, `.hpp`, `.cs`, `.sh`, `.sql` | — | done | `github.com/alecthomas/chroma/v2` lexer (pure Go); structure-aware for brace + indent families; Ruby/SQL flat-windowed pending own splitter |
 | DOCX | `.docx` | P1 | todo | stdlib `archive/zip` + `encoding/xml`; alt `github.com/nguyenthenguyen/docx`, `github.com/sajari/docconv` (**shells out to external binaries**) |
 | Config | `.json`, `.yaml`, `.yml`, `.toml`, `.ini`, `.properties` | P2 | todo | stdlib (v1, text); `gopkg.in/yaml.v3`, `encoding/json` (optional, key-path structure) |
 | HTML | `.html`, `.htm` | P2 | todo | `golang.org/x/net/html`; alt `github.com/PuerkitoBio/goquery` |

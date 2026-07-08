@@ -40,6 +40,32 @@ headers/footers stripped, and hyphenated line breaks rejoined — producing sect
 inherits the general chunk config (paragraphs, 350 / 50). See
 [research/pdf-extraction-engine.md](research/pdf-extraction-engine.md).
 
+## Code (`strategy/code`)
+
+Detects definition boundaries with a Chroma lexer (pure Go, no CGO) and makes one section per
+function/class, so each chunk is a coherent unit titled with its nesting path
+(`class Invoice > total()`). Definitions are found by token *category* — a `NameFunction` /
+`NameClass` introduced by a declaration keyword — never by keyword spelling, so modifiers
+(`public`, `static`, `readonly`, `async`) and language differences need no special-casing. A
+definition's leading doc-comment and decorators snap onto it. Budget 400 / overlap 40; a
+definition over budget is windowed by line (indentation preserved) with overlap.
+
+Two families share the section/heading model and differ only in how a block's extent is found:
+
+- **Brace family** (Go, JS/TS/JSX/TSX, Java, PHP, Rust, C/C++, C#, shell) — nesting by brace
+  depth, counting only real punctuation braces, so braces inside strings and comments never
+  miscount.
+- **Indent family** (Python) — nesting read from leading indentation.
+
+Ruby and SQL are claimed but use a **flat** splitter (whole file, no definition boundaries)
+until they get their own splitter; they are still normalized, chunked with overlap, and
+embedded. Files whose name marks them minified/bundled, or whose content is minified (a line
+over 5000 runes) or carries a generated-code banner, are skipped entirely.
+
+Because the file path is needed to pick the lexer and family, and `Parse` only receives bytes,
+the code strategy normalizes in `Parse` and does its sectioning in `Chunk` (which has the
+path) — the one place its flow differs from the other strategies.
+
 ## Token estimation
 
 Approximate, not a real tokenizer: `ceil(runeCount / averageTokenLength)` with
