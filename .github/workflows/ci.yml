@@ -19,13 +19,13 @@ jobs:
     env:
       CGO_ENABLED: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install sqlite headers (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -45,7 +45,7 @@ jobs:
     env:
       CGO_ENABLED: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # The sqlite-vec bindings #include "sqlite3.h", which Windows has no system
       # copy of. MSYS2 provides both the gcc cgo needs and the sqlite3 headers.
@@ -58,7 +58,7 @@ jobs:
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-sqlite3
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
