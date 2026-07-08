@@ -66,6 +66,17 @@ Because the file path is needed to pick the lexer and family, and `Parse` only r
 the code strategy normalizes in `Parse` and does its sectioning in `Chunk` (which has the
 path) — the one place its flow differs from the other strategies.
 
+## DOCX (`strategy/docx`)
+
+A `.docx` is a ZIP of XML, read with the standard library (`archive/zip` + `encoding/xml`) —
+no CGO, no external binary. `word/document.xml` is streamed paragraph by paragraph:
+heading paragraphs (identified by `outlineLvl`, resolved from the paragraph or from
+`word/styles.xml`, 0-based → 1-based) push onto the shared heading stack; body paragraphs fill
+the current section. This produces the same `Section{Path, Body}` structure as Markdown, so
+DOCX overrides only `Claims` and `Parse` and inherits the general paragraph chunker (350 / 50)
+— chunks are titled with their full heading path (`Guide > Payments`). Tables are linearized
+into the surrounding section; headers/footers and footnotes are skipped.
+
 ## Token estimation
 
 Approximate, not a real tokenizer: `ceil(runeCount / averageTokenLength)` with

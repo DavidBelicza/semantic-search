@@ -8,6 +8,7 @@ import (
 	"github.com/davidbelicza/semantic-search/internal/storage/sqlitevec"
 	"github.com/davidbelicza/semantic-search/internal/strategy"
 	"github.com/davidbelicza/semantic-search/internal/strategy/code"
+	"github.com/davidbelicza/semantic-search/internal/strategy/docx"
 	"github.com/davidbelicza/semantic-search/internal/strategy/general"
 	"github.com/davidbelicza/semantic-search/internal/strategy/markdown"
 	"github.com/davidbelicza/semantic-search/internal/strategy/pdf"
@@ -43,7 +44,8 @@ func build(ctx context.Context, dbPath string) (dependencies, error) {
 	markdownStrategy := markdown.NewMarkdownStrategy(base)
 	pdfStrategy := pdf.NewPDFStrategy(base, pdfExtractor)
 	codeStrategy := code.NewCodeStrategy(base)
-	pool := strategy.NewPool(markdownStrategy, pdfStrategy, codeStrategy, base)
+	docxStrategy := docx.NewDocxStrategy(base)
+	pool := strategy.NewPool(markdownStrategy, pdfStrategy, codeStrategy, docxStrategy, base)
 
 	return dependencies{store: store, vectorStore: vectorStore, pool: pool, pdfExtractor: pdfExtractor}, nil
 }

@@ -18,6 +18,7 @@ internal/strategy    the per-file contract (Strategy interface) + Pool; concrete
                        strategy/markdown  Markdown parsing/chunking
                        strategy/pdf       PDF parsing (PDFium) + font-based sections
                        strategy/code      code parsing (Chroma lexer) + definition sections
+                       strategy/docx      DOCX parsing (zip + XML) + heading sections
 internal/storage     resource entities (Document, Chunk, …); no database code
   storage/sqlite     documents + chunks tables (source of truth)
   storage/sqlitevec  sqlite-vec vectors
@@ -60,8 +61,12 @@ Embed(ctx, chunks) ([][]float32, error)
   (normalize + guard), and `Chunk` (a Chroma lexer finds definition boundaries by token
   category — pure Go, no CGO — one section per function/class, titled with its nesting path).
   See [chunking.md](chunking.md).
+- **`docx`** — overrides `Claims` (`.docx`) and `Parse` (unzips the document with the standard
+  library — no CGO — and maps Word heading paragraphs onto the heading-path model via
+  `outlineLvl`). It inherits chunking, metadata, fingerprint, and embed. See
+  [chunking.md](chunking.md).
 
-Markdown, PDF, and Code **embed** `GeneralStrategy` (Go composition, not inheritance), reusing its
+Markdown, PDF, Code, and DOCX **embed** `GeneralStrategy` (Go composition, not inheritance), reusing its
 methods without proxy code and overriding only what their format needs. The embedder is
 injected, because embedding is a per-file operation the strategy owns. A `Pool` holds the
 strategies; `Pool.For(path)` returns the first that claims a file.
