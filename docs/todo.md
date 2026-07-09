@@ -59,7 +59,7 @@ Package moves (each moved as a whole unit):
 | Strategy constructors | Factories: `NewMarkdownStrategy()`, `NewPDFStrategy()`, `NewCodeStrategy()`, `NewDocxStrategy()`, `NewTextStrategy()` | 1 | done |
 | Facade | Root `semanticsearch` package absorbs `pkg/`: `Index`/`Search` become `Engine` methods, `build.go` wiring splits into `NewEngine` + the constructors, and `IndexOptions`/`SearchResult` move here. Consumers import `core/*` directly for interfaces (no aliases). *(Engine added; old package-level `Index`/`Search`/`build.go` removed in the next step.)* | 1 | done |
 | Remove CLI | After `pkg/` logic has migrated to the facade, delete `pkg/`, `cmd/`, `main.go`; drop cobra / pflag / mousetrap from `go.mod` | 1 | done |
-| E2E tests | Replace the CLI harness: deterministic e2e (fake embedder) + live e2e (real server, env-gated) | 1 | todo |
+| E2E tests | Black-box example test: full composition with an in-process hashing embedder (no server), indexing text/markdown/code/docx fixtures and asserting retrieval — runs in CI | 1 | done |
 | Postgres store | `core/storage/postgres` implementing `Storage` (CGO-free path when sqlite isn't imported) | 2 | todo |
 | pgvector | `VectorStorage` on pgvector; document split-DB (metadata and vectors in separate databases) | 2 | todo |
 | More embedders | Additional `Standard` values behind `NewAiEmbedder` (e.g. Cohere) | 2 | todo |

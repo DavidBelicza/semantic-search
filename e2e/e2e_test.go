@@ -1,0 +1,145 @@
+package e2e
+
+import (
+	"archive/zip"
+	"bytes"
+	"context"
+	"hash/fnv"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"unicode"
+
+	"github.com/davidbelicza/semantic-search"
+)
+
+// TestEndToEnd is an example of the full composition: build an engine from an embedder, two
+// stores, and a set of strategies, index a directory of mixed file types, then search it.
+func TestEndToEnd(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	writeFixtures(t, dir)
+
+	const dimensions = 1024
+
+	store, err := semanticsearch.NewSQLiteStorage(ctx, filepath.Join(dir, "index.db"))
+	if err != nil {
+		t.Fatalf("open storage: %v", err)
+	}
+	defer store.Close()
+
+	vectors, err := semanticsearch.NewSQLiteVectorStorage(ctx, filepath.Join(dir, "vectors.db"), dimensions)
+	if err != nil {
+		t.Fatalf("open vector storage: %v", err)
+	}
+	defer vectors.Close()
+
+	engine, err := semanticsearch.NewEngine(semanticsearch.Config{
+		Embedder:      hashingEmbedder{dim: dimensions}, // production: semanticsearch.NewAiEmbedder(...)
+		Storage:       store,
+		VectorStorage: vectors,
+		Strategies: []semanticsearch.StrategyFactory{
+			semanticsearch.NewTextStrategy(),
+			semanticsearch.NewMarkdownStrategy(),
+			semanticsearch.NewCodeStrategy(),
+			semanticsearch.NewDocxStrategy(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if err := engine.Index(ctx, dir, semanticsearch.IndexOptions{}); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+
+	cases := []struct {
+		query string
+		want  string // a distinctive word expected in the top result
+	}{
+		{"how many paid vacation days do employees get", "vacation"}, // → vacation.txt
+		{"refund to the original payment method", "refund"},          // → billing.md
+		{"read the configuration file from disk", "config"},          // → loader.go
+		{"working remotely from home policy", "remote"},              // → handbook.docx
+	}
+
+	for _, tc := range cases {
+		results, err := engine.Search(ctx, tc.query, 3)
+		if err != nil {
+			t.Fatalf("search %q: %v", tc.query, err)
+		}
+		if len(results) == 0 {
+			t.Fatalf("query %q: no results", tc.query)
+		}
+		if !strings.Contains(strings.ToLower(results[0].Text), tc.want) {
+			t.Errorf("query %q: want top result containing %q, got title=%q text=%q", tc.query, tc.want, results[0].Title, results[0].Text)
+		}
+	}
+}
+
+// hashingEmbedder is a deterministic, in-process embedder for the end-to-end test: it hashes
+// each token into a fixed-size vector, so texts that share words end up close together. It
+// needs no model or server, so this test runs anywhere. In production you would inject
+// semanticsearch.NewAiEmbedder(...) instead — the composition above is otherwise identical.
+type hashingEmbedder struct{ dim int }
+
+func (h hashingEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	vectors := make([][]float32, len(texts))
+	for i, text := range texts {
+		vector := make([]float32, h.dim)
+		for _, token := range tokenize(text) {
+			hasher := fnv.New32a()
+			_, _ = hasher.Write([]byte(token))
+			vector[int(hasher.Sum32()%uint32(h.dim))]++
+		}
+		vectors[i] = vector
+	}
+
+	return vectors, nil
+}
+
+func tokenize(text string) []string {
+	return strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+func writeFixtures(t *testing.T, dir string) {
+	t.Helper()
+
+	write(t, dir, "vacation.txt", "Full-time employees receive fifteen paid vacation days annually, rising to twenty after five years.")
+	write(t, dir, "billing.md", "# Billing\n\n## Refunds\n\nA refund is returned to the original payment method within five business days.")
+	write(t, dir, "loader.go", "package app\n\n// ReadConfig loads the configuration file from disk and parses its settings.\nfunc ReadConfig(path string) (Config, error) {\n\treturn parseConfig(path)\n}\n")
+	writeDocx(t, filepath.Join(dir, "handbook.docx"), "Staff may work remotely from home up to three days per week with manager approval.")
+}
+
+func write(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+}
+
+// writeDocx builds a minimal .docx (a ZIP holding word/document.xml) with the given body text.
+func writeDocx(t *testing.T, path, body string) {
+	t.Helper()
+	document := `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+		`<w:body><w:p><w:r><w:t>` + body + `</w:t></w:r></w:p></w:body></w:document>`
+
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+	w, err := zw.Create("word/document.xml")
+	if err != nil {
+		t.Fatalf("create docx part: %v", err)
+	}
+	if _, err := w.Write([]byte(document)); err != nil {
+		t.Fatalf("write docx part: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close docx: %v", err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write docx: %v", err)
+	}
+}

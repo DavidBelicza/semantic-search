@@ -37,7 +37,15 @@
 - An **OpenAI-compatible embedding server** on `http://127.0.0.1:1234` (e.g. LM Studio)
   serving an embedding model such as EmbeddingGemma-300m (768-dim).
 
-## Build, test, lint
+## Install, build, test, lint
+
+Add the library to your module:
+
+```sh
+go get github.com/davidbelicza/semantic-search
+```
+
+Working on the library itself:
 
 ```sh
 go build ./...   # build (cgo)
@@ -47,8 +55,9 @@ make lint        # golangci-lint
 
 ## Usage
 
-Semantic Search is a library. Compose an engine from an embedder, a metadata store, a vector
-store, and the strategies you want, then index a directory and search it:
+Semantic Search is a library. Copy the following into a Go file (for example `main.go`) to get
+started: it composes an engine from an embedder, a metadata store, a vector store, and the
+strategies you want, then indexes a directory and searches it.
 
 ```go
 package main
@@ -57,12 +66,15 @@ import (
 	"context"
 	"fmt"
 
-	semanticsearch "github.com/davidbelicza/semantic-search"
+	"github.com/davidbelicza/semantic-search"
 )
 
 func main() {
 	ctx := context.Background()
 
+	// Configure the search engine. You compose it from an embedder that turns text into
+	// vectors, a metadata store, a vector store, and the strategies that decide which file
+	// types are handled and how each one is parsed and chunked.
 	store, _ := semanticsearch.NewSQLiteStorage(ctx, "index.db")
 	defer store.Close()
 	vectors, _ := semanticsearch.NewSQLiteVectorStorage(ctx, "vectors.db", 768)
@@ -89,10 +101,15 @@ func main() {
 		panic(err)
 	}
 
+	// Index the directory. The engine maps the directory recursively, parses every supported
+	// file, splits each one into chunks, and embeds those chunks into vectors with the AI model.
 	if err := engine.Index(ctx, "./docs", semanticsearch.IndexOptions{}); err != nil {
 		panic(err)
 	}
 
+	// Search the indexed content. The query is embedded the same way, and the engine returns the
+	// chunks whose meaning is closest to it, so results are matched by meaning rather than exact
+	// keywords.
 	results, _ := engine.Search(ctx, "how do I detect security threats in logs", 5)
 	for _, r := range results {
 		fmt.Printf("%s  (score %.4f)\n%s\n", r.Title, r.Score, r.Text)
@@ -100,10 +117,10 @@ func main() {
 }
 ```
 
-Point the two stores at different paths to keep vectors in a separate database. Bring your own
-`storage.Storage`, `storage.VectorStorage`, `strategy.Embedder`, or `strategy.Strategy`
-implementation to swap any part. Re-running `Index` is incremental: unchanged files (by content
-hash) are not re-embedded.
+Point the two stores at different paths to keep vectors in a separate database. Alternatively,
+bring your own `storage.Storage`, `storage.VectorStorage`, `strategy.Embedder`, or
+`strategy.Strategy` implementation to swap any part. Re-running `Index` is a delta update: it
+compares each file's content hash and re-embeds only the changed files, skipping the rest.
 
 ## Documents
 
