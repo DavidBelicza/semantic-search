@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/davidbelicza/semantic-search/core/storage"
 	"github.com/davidbelicza/semantic-search/core/strategy"
 )
 
@@ -20,6 +21,9 @@ func (fixedEmbedder) Embed(_ context.Context, texts []string) ([][]float32, erro
 	}
 	return vectors, nil
 }
+
+// compile-time check that the fake satisfies the embedder contract.
+var _ strategy.Embedder = fixedEmbedder{}
 
 func newTestEngine(t *testing.T, factories ...StrategyFactory) *Engine {
 	t.Helper()
@@ -50,6 +54,8 @@ func newTestEngine(t *testing.T, factories ...StrategyFactory) *Engine {
 	})
 	return engine
 }
+
+// --- Engine ---
 
 func TestNewEngineRejectsDuplicateExtensions(t *testing.T) {
 	ctx := context.Background()
@@ -104,5 +110,79 @@ func TestEngineIndexAndSearch(t *testing.T) {
 	}
 }
 
-// compile-time check that the built-ins produce the expected interface.
-var _ strategy.Embedder = fixedEmbedder{}
+// --- Embedder ---
+
+func TestNewAiEmbedderOpenAI(t *testing.T) {
+	e := NewAiEmbedder(AiEmbedderConfig{
+		Standard:   StandardOpenAI,
+		BaseURL:    "http://127.0.0.1:1234",
+		Model:      "embeddinggemma-300m",
+		Dimensions: 768,
+	})
+	if e == nil {
+		t.Fatal("expected an embedder for the OpenAI standard")
+	}
+}
+
+func TestNewAiEmbedderUnknownStandardIsNil(t *testing.T) {
+	if NewAiEmbedder(AiEmbedderConfig{Standard: "nope"}) != nil {
+		t.Fatal("expected nil for an unknown standard")
+	}
+}
+
+// --- Storage ---
+
+func TestNewSQLiteStorageOpens(t *testing.T) {
+	store, err := NewSQLiteStorage(context.Background(), filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatalf("open sqlite storage: %v", err)
+	}
+	defer store.Close()
+}
+
+func TestNewSQLiteVectorStorageOpens(t *testing.T) {
+	store, err := NewSQLiteVectorStorage(context.Background(), filepath.Join(t.TempDir(), "vectors.db"), 8)
+	if err != nil {
+		t.Fatalf("open sqlite-vec storage: %v", err)
+	}
+	defer store.Close()
+}
+
+// --- Search helpers ---
+
+func TestBuildSearchResultsResolvesInHitOrder(t *testing.T) {
+	hits := []storage.VectorHit{
+		{ChunkID: 7, Distance: 0.5},
+		{ChunkID: 9, Distance: 0.8},
+	}
+	metadata := []storage.ChunkMetadata{
+		{ChunkID: 9, DocumentID: 2, Title: "Refunds", Text: "refund the payment"},
+		{ChunkID: 7, DocumentID: 42, Title: "Payments", Text: "pay the invoice"},
+	}
+
+	results := buildSearchResults(hits, metadata)
+
+	if len(results) != 2 {
+		t.Fatalf("result count mismatch: %d", len(results))
+	}
+	if got := results[0]; got.ChunkID != 7 || got.DocumentID != 42 || got.Title != "Payments" || got.Text != "pay the invoice" || got.Score != 0.5 {
+		t.Fatalf("first result mismatch: %#v", got)
+	}
+	if results[1].ChunkID != 9 {
+		t.Fatalf("hit order not preserved: %#v", results)
+	}
+}
+
+func TestBuildSearchResultsSkipsMissingMetadata(t *testing.T) {
+	hits := []storage.VectorHit{{ChunkID: 1, Distance: 0.1}}
+	if results := buildSearchResults(hits, nil); len(results) != 0 {
+		t.Fatalf("expected no results when metadata is missing, got %d", len(results))
+	}
+}
+
+func TestHitChunkIDs(t *testing.T) {
+	ids := hitChunkIDs([]storage.VectorHit{{ChunkID: 3}, {ChunkID: 5}})
+	if len(ids) != 2 || ids[0] != 3 || ids[1] != 5 {
+		t.Fatalf("chunk ids mismatch: %v", ids)
+	}
+}
