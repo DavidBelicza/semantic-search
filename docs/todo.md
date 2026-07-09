@@ -50,10 +50,10 @@ Package moves (each moved as a whole unit):
 
 | Step | Change | Phase | Status |
 |---|---|---|---|
-| Move to core | Move whole packages `internal/{embedder,storage,strategy}` → `core/{embedder,storage,strategy}`; update import paths; `internal/{fs,pipeline,textproc}` stay | 1 | todo |
-| Store interfaces | Define `Storage` (metadata/chunks) and `VectorStorage` interfaces in `core/storage` from the current sqlite/sqlitevec methods; pipeline depends on the interfaces, not concrete stores | 1 | todo |
+| Move to core | Move whole packages `internal/{embedder,storage,strategy}` → `core/{embedder,storage,strategy}`; update import paths; `internal/{fs,pipeline,textproc}` stay | 1 | done |
+| Store interfaces | Define `Storage` (metadata/chunks) and `VectorStorage` interfaces in `core/storage` from the current sqlite/sqlitevec methods; pipeline depends on the interfaces, not concrete stores | 1 | done |
 | Embedder injection | Facade strategy constructors are factories; `NewEngine` builds each strategy with the injected embedder (`general.NewGeneralStrategy(embedder)`), keeping `Embed` and `Claims` unchanged | 1 | todo |
-| Embedder API | `NewAiEmbedder(AiEmbedderConfig{Standard, BaseURL, Model, Dimensions})` with typed `StandardOpenAI` const | 1 | todo |
+| Embedder API | `NewAiEmbedder(AiEmbedderConfig{Standard, BaseURL, Model, Dimensions})` with typed `StandardOpenAI` const | 1 | done |
 | Dup validation | Facade constructors carry each built-in's extensions (custom strategies supply their own); `NewEngine` errors on duplicate extensions | 1 | todo |
 | Store constructors | Per-type: `NewSQLiteStorage(path)`, `NewSQLiteVectorStorage(path)` (returning `core/storage` interfaces) | 1 | todo |
 | Strategy constructors | Factories: `NewMarkdownStrategy()`, `NewPDFStrategy()`, `NewCodeStrategy()`, `NewDocxStrategy()`, `NewTextStrategy()` | 1 | todo |
