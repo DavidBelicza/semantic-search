@@ -316,6 +316,27 @@ func main() {
 }
 ```
 
+### Custom embedder
+
+The built-in `NewAiEmbedder` speaks the OpenAI-compatible protocol with an optional `APIKey`
+(sent as a Bearer token). For anything it does not cover — rotating OAuth tokens (e.g. Vertex
+AI), request signing (e.g. AWS Bedrock), or a non-OpenAI wire format — implement the embedder
+interface yourself and inject it. It is a single method:
+
+```go
+type myEmbedder struct {
+	// your HTTP client, credentials, token cache, etc.
+}
+
+func (m myEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	// Refresh your OAuth token / sign the request here, call your provider, and
+	// return one vector per input text, in the same order.
+}
+
+// Inject it like any other embedder:
+// semanticsearch.NewEngine(semanticsearch.Config{ Embedder: myEmbedder{...}, ... })
+```
+
 ## Documents
 
 ### Reference

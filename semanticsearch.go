@@ -8,7 +8,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/davidbelicza/semantic-search/core/embedder"
 	"github.com/davidbelicza/semantic-search/core/storage"
@@ -156,6 +158,11 @@ type AiEmbedderConfig struct {
 	BaseURL    string
 	Model      string
 	Dimensions int
+	// APIKey is optional. When set it is sent as an "Authorization: Bearer <APIKey>" header
+	// for hosted endpoints; leave it empty for local servers that need no authentication.
+	APIKey string
+	// Timeout is optional per-request timeout for embedding calls. Zero uses the default.
+	Timeout time.Duration
 }
 
 // NewAiEmbedder builds an embedder for the given standard. It returns nil for an unknown
@@ -168,6 +175,10 @@ func NewAiEmbedder(config AiEmbedderConfig) strategy.Embedder {
 	client := embedder.NewOpenAIEmbedder(config.BaseURL, config.Model)
 	if config.Dimensions > 0 {
 		client.Dimensions = config.Dimensions
+	}
+	client.APIKey = config.APIKey
+	if config.Timeout > 0 {
+		client.HTTPClient = &http.Client{Timeout: config.Timeout}
 	}
 
 	return client

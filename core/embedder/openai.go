@@ -48,6 +48,9 @@ type OpenAIEmbedder struct {
 	MaxRetries  int
 	BackoffBase time.Duration
 	HTTPClient  *http.Client
+	// APIKey, when set, is sent as an "Authorization: Bearer <APIKey>" header. Leave it empty
+	// for local servers (e.g. LM Studio) that need no authentication.
+	APIKey string
 	// Prefix is prepended to every input before embedding (e.g. a task prefix). The
 	// stored chunk text is unaffected; only the embedding input carries the prefix.
 	Prefix string
@@ -169,6 +172,9 @@ func (e OpenAIEmbedder) embedOnce(ctx context.Context, endpoint string, body []b
 		return nil, false, err
 	}
 	request.Header.Set("Content-Type", "application/json")
+	if e.APIKey != "" {
+		request.Header.Set("Authorization", "Bearer "+e.APIKey)
+	}
 
 	response, err := e.client().Do(request)
 	if err != nil {
