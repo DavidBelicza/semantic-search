@@ -221,11 +221,24 @@ func NewPostgresStorage(ctx context.Context, dsn string) (storage.Storage, error
 	return store, nil
 }
 
+// PostgresVectorIndex selects how the pgvector store searches.
+type PostgresVectorIndex string
+
+const (
+	// PostgresKNN is exact brute-force k-nearest-neighbor search (a sequential scan, 100%
+	// recall). Best below a few hundred thousand vectors.
+	PostgresKNN PostgresVectorIndex = "knn"
+	// PostgresHNSW is approximate nearest-neighbor search backed by an HNSW index
+	// (sub-linear, trades some recall for speed). Best at large scale.
+	PostgresHNSW PostgresVectorIndex = "hnsw"
+)
+
 // NewPostgresVectorStorage opens a pgvector vector store at dsn, sized to the embedding
 // dimensions, and prepares its schema. The server must have the pgvector extension available.
-// Point it at a different dsn than the metadata store to keep vectors in a separate database.
-func NewPostgresVectorStorage(ctx context.Context, dsn string, dimensions int) (storage.VectorStorage, error) {
-	store, err := pgvector.Open(ctx, dsn, dimensions)
+// The index selects exact (PostgresKNN) or approximate (PostgresHNSW) search. Point it at a
+// different dsn than the metadata store to keep vectors in a separate database.
+func NewPostgresVectorStorage(ctx context.Context, dsn string, dimensions int, index PostgresVectorIndex) (storage.VectorStorage, error) {
+	store, err := pgvector.Open(ctx, dsn, dimensions, index == PostgresHNSW)
 	if err != nil {
 		return nil, err
 	}

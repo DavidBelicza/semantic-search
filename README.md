@@ -155,7 +155,7 @@ func main() {
 
 	store, _ := semanticsearch.NewPostgresStorage(ctx, dsn)
 	defer store.Close()
-	vectors, _ := semanticsearch.NewPostgresVectorStorage(ctx, dsn, 768)
+	vectors, _ := semanticsearch.NewPostgresVectorStorage(ctx, dsn, 768, semanticsearch.PostgresKNN)
 	defer vectors.Close()
 
 	engine, err := semanticsearch.NewEngine(semanticsearch.Config{
@@ -193,6 +193,66 @@ func main() {
 
 The pgvector driver is pure Go, so a Postgres-only build (importing neither SQLite store) needs
 no cgo and no C compiler.
+
+### Approximate search at scale with HNSW
+
+Exact search (`PostgresKNN`) compares the query against every vector, which stays fast up to a
+few hundred thousand vectors. Beyond that, switch the vector store to `PostgresHNSW`: it builds
+an [HNSW](https://github.com/pgvector/pgvector#hnsw) index for approximate nearest-neighbor
+search, which is sub-linear and much faster at large scale, trading a little recall for speed.
+Only the vector store constructor changes — everything else is identical.
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/davidbelicza/semantic-search"
+)
+
+func main() {
+	ctx := context.Background()
+	dsn := "postgres://semanticsearch:semanticsearch@127.0.0.1:5432/semanticsearch?sslmode=disable"
+
+	store, _ := semanticsearch.NewPostgresStorage(ctx, dsn)
+	defer store.Close()
+	// PostgresHNSW builds an HNSW index for approximate search at large scale.
+	vectors, _ := semanticsearch.NewPostgresVectorStorage(ctx, dsn, 768, semanticsearch.PostgresHNSW)
+	defer vectors.Close()
+
+	engine, err := semanticsearch.NewEngine(semanticsearch.Config{
+		Embedder: semanticsearch.NewAiEmbedder(semanticsearch.AiEmbedderConfig{
+			Standard:   semanticsearch.StandardOpenAI,
+			BaseURL:    "http://127.0.0.1:1234",
+			Model:      "text-embedding-embeddinggemma-300m-qat",
+			Dimensions: 768,
+		}),
+		Storage:       store,
+		VectorStorage: vectors,
+		Strategies: []semanticsearch.StrategyFactory{
+			semanticsearch.NewMarkdownStrategy(),
+			semanticsearch.NewPDFStrategy(),
+			semanticsearch.NewCodeStrategy(),
+			semanticsearch.NewDocxStrategy(),
+			semanticsearch.NewTextStrategy(),
+		},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	if err := engine.Index(ctx, "./docs", semanticsearch.IndexOptions{}); err != nil {
+		panic(err)
+	}
+
+	results, _ := engine.Search(ctx, "how do I detect security threats in logs", 5)
+	for _, r := range results {
+		fmt.Printf("%s  (score %.4f)\n%s\n", r.Title, r.Score, r.Text)
+	}
+}
+```
 
 ## Documents
 

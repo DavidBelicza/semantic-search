@@ -23,11 +23,15 @@ const chunkVectorsTable = "chunk_vectors"
 type Store struct {
 	db         *sql.DB
 	dimensions int
+	// hnsw builds an HNSW index for approximate (ANN) search; when false, search is exact
+	// brute-force kNN over a sequential scan.
+	hnsw bool
 }
 
 // Open connects to the PostgreSQL database at dsn and ensures the pgvector schema exists. The
-// server must have the pgvector extension available.
-func Open(ctx context.Context, dsn string, dimensions int) (*Store, error) {
+// server must have the pgvector extension available. When hnsw is true an HNSW index is
+// created for approximate search; otherwise search is exact.
+func Open(ctx context.Context, dsn string, dimensions int, hnsw bool) (*Store, error) {
 	if dimensions <= 0 {
 		return nil, fmt.Errorf("embedding dimensions are required")
 	}
@@ -37,7 +41,7 @@ func Open(ctx context.Context, dsn string, dimensions int) (*Store, error) {
 		return nil, err
 	}
 
-	store := &Store{db: db, dimensions: dimensions}
+	store := &Store{db: db, dimensions: dimensions, hnsw: hnsw}
 	if err := store.EnsureSchema(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -63,6 +67,25 @@ func (s *Store) EnsureSchema(ctx context.Context) error {
 	)
 	if _, err := s.db.ExecContext(ctx, create); err != nil {
 		return fmt.Errorf("create vector table: %w", err)
+	}
+
+	return s.ensureIndex(ctx)
+}
+
+// ensureIndex creates the HNSW index for approximate search when the store is in HNSW mode.
+// The operator class (vector_cosine_ops) matches the cosine operator (<=>) used by Search, so
+// Postgres uses the index automatically. In KNN mode there is no index and search is exact.
+func (s *Store) ensureIndex(ctx context.Context) error {
+	if !s.hnsw {
+		return nil
+	}
+
+	index := fmt.Sprintf(
+		"CREATE INDEX IF NOT EXISTS %s_embedding_hnsw ON %s USING hnsw (embedding vector_cosine_ops)",
+		chunkVectorsTable, chunkVectorsTable,
+	)
+	if _, err := s.db.ExecContext(ctx, index); err != nil {
+		return fmt.Errorf("create hnsw index: %w", err)
 	}
 
 	return nil

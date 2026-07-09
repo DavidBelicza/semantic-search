@@ -64,7 +64,7 @@ func TestEndToEndPostgres(t *testing.T) {
 	}
 	defer store.Close()
 
-	vectors, err := semanticsearch.NewPostgresVectorStorage(ctx, dsn, dimensions)
+	vectors, err := semanticsearch.NewPostgresVectorStorage(ctx, dsn, dimensions, semanticsearch.PostgresKNN)
 	if err != nil {
 		t.Fatalf("open vector storage: %v", err)
 	}

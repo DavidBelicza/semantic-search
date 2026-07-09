@@ -2,40 +2,51 @@ package pgvector
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"testing"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	storage "github.com/davidbelicza/semantic-search/core/storage"
 )
 
 // testStore opens a store against SEMANTIC_SEARCH_POSTGRES_DSN and resets its table. The test
 // is skipped when the DSN is not set.
-func testStore(t *testing.T, dimensions int) *Store {
+func testStore(t *testing.T, dimensions int, hnsw bool) *Store {
 	t.Helper()
 	dsn := os.Getenv("SEMANTIC_SEARCH_POSTGRES_DSN")
 	if dsn == "" {
 		t.Skip("set SEMANTIC_SEARCH_POSTGRES_DSN to run pgvector integration tests")
 	}
 
-	store, err := Open(context.Background(), dsn, dimensions)
+	if _, err := reset(context.Background(), dsn); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+
+	store, err := Open(context.Background(), dsn, dimensions, hnsw)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(func() { store.Close() })
 
-	if _, err := store.db.ExecContext(context.Background(), "DROP TABLE IF EXISTS "+chunkVectorsTable); err != nil {
-		t.Fatalf("reset: %v", err)
-	}
-	if err := store.EnsureSchema(context.Background()); err != nil {
-		t.Fatalf("schema: %v", err)
-	}
-
 	return store
+}
+
+// reset drops the vector table so each test starts from a clean schema (including any index).
+func reset(ctx context.Context, dsn string) (bool, error) {
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+	_, err = db.ExecContext(ctx, "DROP TABLE IF EXISTS "+chunkVectorsTable)
+	return err == nil, err
 }
 
 func TestPgvectorReplaceSearchDelete(t *testing.T) {
 	ctx := context.Background()
-	store := testStore(t, 4)
+	store := testStore(t, 4, false)
 
 	if err := store.Replace(ctx, []storage.ChunkEmbedding{
 		{ChunkID: 1, Vector: []float32{1, 0, 0, 0}},
@@ -69,7 +80,7 @@ func TestPgvectorReplaceSearchDelete(t *testing.T) {
 
 func TestPgvectorReplaceIsUpsert(t *testing.T) {
 	ctx := context.Background()
-	store := testStore(t, 4)
+	store := testStore(t, 4, false)
 
 	if err := store.Replace(ctx, []storage.ChunkEmbedding{{ChunkID: 1, Vector: []float32{1, 0, 0, 0}}}); err != nil {
 		t.Fatalf("first replace: %v", err)
@@ -81,5 +92,27 @@ func TestPgvectorReplaceIsUpsert(t *testing.T) {
 	hits, err := store.Search(ctx, []float32{0, 0, 0, 1}, 1)
 	if err != nil || len(hits) != 1 || hits[0].ChunkID != 1 {
 		t.Fatalf("upsert not applied: %v %+v", err, hits)
+	}
+}
+
+// TestPgvectorHNSWSearch exercises the HNSW index path: the schema builds the index and search
+// still returns the nearest vector.
+func TestPgvectorHNSWSearch(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t, 4, true)
+
+	if err := store.Replace(ctx, []storage.ChunkEmbedding{
+		{ChunkID: 1, Vector: []float32{1, 0, 0, 0}},
+		{ChunkID: 2, Vector: []float32{0, 1, 0, 0}},
+	}); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+
+	hits, err := store.Search(ctx, []float32{0.9, 0.1, 0, 0}, 1)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(hits) != 1 || hits[0].ChunkID != 1 {
+		t.Fatalf("want chunk 1 as nearest, got %+v", hits)
 	}
 }
