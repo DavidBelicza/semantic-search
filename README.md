@@ -122,6 +122,68 @@ bring your own `storage.Storage`, `storage.VectorStorage`, `strategy.Embedder`, 
 `strategy.Strategy` implementation to swap any part. Re-running `Index` is a delta update: it
 compares each file's content hash and re-embeds only the changed files, skipping the rest.
 
+### In-memory SQLite (single process)
+
+To keep everything in RAM instead of on disk, give both stores an in-memory SQLite DSN. The
+only change from the example above is the two store paths — the engine, indexing, and search
+are identical. Because the data lives only in this process, **you must index and search in the
+same run**: a later process starts from an empty database.
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/davidbelicza/semantic-search"
+)
+
+func main() {
+	ctx := context.Background()
+
+	// In-memory databases. "mode=memory&cache=shared" keeps one database shared across the
+	// connection pool; distinct names (meta, vec) keep the two stores apart. Nothing is
+	// written to disk, and everything is gone when this process exits.
+	store, _ := semanticsearch.NewSQLiteStorage(ctx, "file:meta?mode=memory&cache=shared")
+	defer store.Close()
+	vectors, _ := semanticsearch.NewSQLiteVectorStorage(ctx, "file:vec?mode=memory&cache=shared", 768)
+	defer vectors.Close()
+
+	engine, err := semanticsearch.NewEngine(semanticsearch.Config{
+		Embedder: semanticsearch.NewAiEmbedder(semanticsearch.AiEmbedderConfig{
+			Standard:   semanticsearch.StandardOpenAI,
+			BaseURL:    "http://127.0.0.1:1234",
+			Model:      "text-embedding-embeddinggemma-300m-qat",
+			Dimensions: 768,
+		}),
+		Storage:       store,
+		VectorStorage: vectors,
+		Strategies: []semanticsearch.StrategyFactory{
+			semanticsearch.NewMarkdownStrategy(),
+			semanticsearch.NewPDFStrategy(),
+			semanticsearch.NewCodeStrategy(),
+			semanticsearch.NewDocxStrategy(),
+			semanticsearch.NewTextStrategy(),
+		},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	// Index and search happen in the same process, back to back, because the RAM-only
+	// database does not survive a restart.
+	if err := engine.Index(ctx, "./docs", semanticsearch.IndexOptions{}); err != nil {
+		panic(err)
+	}
+
+	results, _ := engine.Search(ctx, "how do I detect security threats in logs", 5)
+	for _, r := range results {
+		fmt.Printf("%s  (score %.4f)\n%s\n", r.Title, r.Score, r.Text)
+	}
+}
+```
+
 ### Server-side setup with PostgreSQL and pgvector
 
 To store the index and vectors on a PostgreSQL server instead of local SQLite files, swap the
