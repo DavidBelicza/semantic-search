@@ -3,15 +3,15 @@ package semanticsearch
 import (
 	"context"
 
-	"github.com/davidbelicza/semantic-search/internal/embedder"
-	"github.com/davidbelicza/semantic-search/internal/storage/sqlite"
-	"github.com/davidbelicza/semantic-search/internal/storage/sqlitevec"
-	"github.com/davidbelicza/semantic-search/internal/strategy"
-	"github.com/davidbelicza/semantic-search/internal/strategy/code"
-	"github.com/davidbelicza/semantic-search/internal/strategy/docx"
-	"github.com/davidbelicza/semantic-search/internal/strategy/general"
-	"github.com/davidbelicza/semantic-search/internal/strategy/markdown"
-	"github.com/davidbelicza/semantic-search/internal/strategy/pdf"
+	"github.com/davidbelicza/semantic-search/core/embedder"
+	"github.com/davidbelicza/semantic-search/core/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/core/storage/sqlitevec"
+	"github.com/davidbelicza/semantic-search/core/strategy"
+	"github.com/davidbelicza/semantic-search/core/strategy/code"
+	"github.com/davidbelicza/semantic-search/core/strategy/docx"
+	"github.com/davidbelicza/semantic-search/core/strategy/general"
+	"github.com/davidbelicza/semantic-search/core/strategy/markdown"
+	"github.com/davidbelicza/semantic-search/core/strategy/pdf"
 )
 
 // dependencies is the fully instantiated object graph the pipelines need.

@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"github.com/davidbelicza/semantic-search/internal/pipeline"
-	"github.com/davidbelicza/semantic-search/internal/storage"
-	"github.com/davidbelicza/semantic-search/internal/storage/sqlite"
-	"github.com/davidbelicza/semantic-search/internal/strategy"
-	"github.com/davidbelicza/semantic-search/internal/strategy/general"
-	"github.com/davidbelicza/semantic-search/internal/strategy/markdown"
+	"github.com/davidbelicza/semantic-search/core/storage"
+	"github.com/davidbelicza/semantic-search/core/storage/sqlite"
+	"github.com/davidbelicza/semantic-search/core/strategy"
+	"github.com/davidbelicza/semantic-search/core/strategy/general"
+	"github.com/davidbelicza/semantic-search/core/strategy/markdown"
 )
 
 func TestIndexDiscoversRegistersAndFingerprints(t *testing.T) {

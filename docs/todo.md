@@ -1,7 +1,7 @@
 # Format support — roadmap
 
 Planned and completed file-format strategies. Each format is a strategy subpackage under
-`internal/strategy/` that embeds `GeneralStrategy` and overrides only what it needs
+`core/strategy/` that embeds `GeneralStrategy` and overrides only what it needs
 (`Claims`, `Parse`, and `Chunk` when the format chunks differently). Adding one touches no
 other layer — see [architecture.md](architecture.md).
 
