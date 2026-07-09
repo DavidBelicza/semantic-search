@@ -12,6 +12,8 @@ import (
 
 	"github.com/davidbelicza/semantic-search/core/embedder"
 	"github.com/davidbelicza/semantic-search/core/storage"
+	"github.com/davidbelicza/semantic-search/core/storage/pgvector"
+	"github.com/davidbelicza/semantic-search/core/storage/postgres"
 	"github.com/davidbelicza/semantic-search/core/storage/sqlite"
 	"github.com/davidbelicza/semantic-search/core/storage/sqlitevec"
 	"github.com/davidbelicza/semantic-search/core/strategy"
@@ -195,6 +197,35 @@ func NewSQLiteStorage(ctx context.Context, path string) (storage.Storage, error)
 // keep vectors in a separate database.
 func NewSQLiteVectorStorage(ctx context.Context, path string, dimensions int) (storage.VectorStorage, error) {
 	store, err := sqlitevec.Open(ctx, path, dimensions)
+	if err != nil {
+		return nil, err
+	}
+
+	return store, nil
+}
+
+// NewPostgresStorage opens a PostgreSQL metadata store at dsn (e.g.
+// "postgres://user:pass@host:5432/db?sslmode=disable") and prepares its schema. It uses the
+// pure-Go pgx driver, so a Postgres-only build needs no cgo.
+func NewPostgresStorage(ctx context.Context, dsn string) (storage.Storage, error) {
+	store, err := postgres.Open(dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := store.EnsureSchema(ctx); err != nil {
+		store.Close()
+		return nil, err
+	}
+
+	return store, nil
+}
+
+// NewPostgresVectorStorage opens a pgvector vector store at dsn, sized to the embedding
+// dimensions, and prepares its schema. The server must have the pgvector extension available.
+// Point it at a different dsn than the metadata store to keep vectors in a separate database.
+func NewPostgresVectorStorage(ctx context.Context, dsn string, dimensions int) (storage.VectorStorage, error) {
+	store, err := pgvector.Open(ctx, dsn, dimensions)
 	if err != nil {
 		return nil, err
 	}

@@ -68,3 +68,37 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+  postgres-e2e:
+    name: Postgres E2E
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: semanticsearch
+          POSTGRES_PASSWORD: semanticsearch
+          POSTGRES_DB: semanticsearch
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U semanticsearch"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CGO_ENABLED: "1"
+      SEMANTIC_SEARCH_POSTGRES_DSN: postgres://semanticsearch:semanticsearch@localhost:5432/semanticsearch?sslmode=disable
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install sqlite headers
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test (postgres + pgvector + e2e)
+        run: go test ./core/storage/postgres/ ./core/storage/pgvector/ ./test/e2e/

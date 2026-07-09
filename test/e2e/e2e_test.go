@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"database/sql"
 	"hash/fnv"
 	"os"
 	"path/filepath"
@@ -11,7 +12,10 @@ import (
 	"testing"
 	"unicode"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
+
 	"github.com/davidbelicza/semantic-search"
+	"github.com/davidbelicza/semantic-search/core/storage"
 )
 
 // TestEndToEnd is an example of the full composition: build an engine from an embedder, two
@@ -35,6 +39,43 @@ func TestEndToEnd(t *testing.T) {
 	}
 	defer vectors.Close()
 
+	engine := newEngine(t, store, vectors, dimensions)
+	assertRetrieval(t, engine, dir)
+}
+
+// TestEndToEndPostgres runs the same composition against PostgreSQL + pgvector. It is skipped
+// unless SEMANTIC_SEARCH_POSTGRES_DSN is set (e.g. the docker/docker-compose.yml database).
+func TestEndToEndPostgres(t *testing.T) {
+	dsn := os.Getenv("SEMANTIC_SEARCH_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set SEMANTIC_SEARCH_POSTGRES_DSN to run the postgres end-to-end test")
+	}
+
+	ctx := context.Background()
+	dir := t.TempDir()
+	writeFixtures(t, dir)
+	resetPostgres(t, dsn)
+
+	const dimensions = 1024
+
+	store, err := semanticsearch.NewPostgresStorage(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open storage: %v", err)
+	}
+	defer store.Close()
+
+	vectors, err := semanticsearch.NewPostgresVectorStorage(ctx, dsn, dimensions)
+	if err != nil {
+		t.Fatalf("open vector storage: %v", err)
+	}
+	defer vectors.Close()
+
+	engine := newEngine(t, store, vectors, dimensions)
+	assertRetrieval(t, engine, dir)
+}
+
+func newEngine(t *testing.T, store storage.Storage, vectors storage.VectorStorage, dimensions int) *semanticsearch.Engine {
+	t.Helper()
 	engine, err := semanticsearch.NewEngine(semanticsearch.Config{
 		Embedder:      hashingEmbedder{dim: dimensions}, // production: semanticsearch.NewAiEmbedder(...)
 		Storage:       store,
@@ -49,6 +90,15 @@ func TestEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
+
+	return engine
+}
+
+// assertRetrieval indexes the fixtures and checks that each query's top result comes from the
+// expected file, across all four formats.
+func assertRetrieval(t *testing.T, engine *semanticsearch.Engine, dir string) {
+	t.Helper()
+	ctx := context.Background()
 
 	if err := engine.Index(ctx, dir, semanticsearch.IndexOptions{}); err != nil {
 		t.Fatalf("index: %v", err)
@@ -75,6 +125,19 @@ func TestEndToEnd(t *testing.T) {
 		if !strings.Contains(strings.ToLower(results[0].Text), tc.want) {
 			t.Errorf("query %q: want top result containing %q, got title=%q text=%q", tc.query, tc.want, results[0].Title, results[0].Text)
 		}
+	}
+}
+
+// resetPostgres drops the tables the stores use so each run starts clean.
+func resetPostgres(t *testing.T, dsn string) {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open reset connection: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("DROP TABLE IF EXISTS chunks, documents, chunk_vectors CASCADE"); err != nil {
+		t.Fatalf("reset postgres: %v", err)
 	}
 }
 

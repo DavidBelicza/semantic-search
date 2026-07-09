@@ -122,6 +122,78 @@ bring your own `storage.Storage`, `storage.VectorStorage`, `strategy.Embedder`, 
 `strategy.Strategy` implementation to swap any part. Re-running `Index` is a delta update: it
 compares each file's content hash and re-embeds only the changed files, skipping the rest.
 
+### Server-side setup with PostgreSQL and pgvector
+
+To store the index and vectors on a PostgreSQL server instead of local SQLite files, swap the
+two store constructors for their Postgres equivalents. The server must have the
+[pgvector](https://github.com/pgvector/pgvector) extension available; for local development a
+ready-to-use database is provided:
+
+```sh
+docker compose -f test/docker/docker-compose.yml up -d
+```
+
+Copy the following into a Go file (for example `main.go`). It is identical to the example above
+except that the two stores are backed by PostgreSQL and pgvector.
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/davidbelicza/semantic-search"
+)
+
+func main() {
+	ctx := context.Background()
+
+	// Configure the search engine backed by a PostgreSQL server. The metadata store and the
+	// vector store can share one database or point at two different servers.
+	dsn := "postgres://semanticsearch:semanticsearch@127.0.0.1:5432/semanticsearch?sslmode=disable"
+
+	store, _ := semanticsearch.NewPostgresStorage(ctx, dsn)
+	defer store.Close()
+	vectors, _ := semanticsearch.NewPostgresVectorStorage(ctx, dsn, 768)
+	defer vectors.Close()
+
+	engine, err := semanticsearch.NewEngine(semanticsearch.Config{
+		Embedder: semanticsearch.NewAiEmbedder(semanticsearch.AiEmbedderConfig{
+			Standard:   semanticsearch.StandardOpenAI,
+			BaseURL:    "http://127.0.0.1:1234",
+			Model:      "text-embedding-embeddinggemma-300m-qat",
+			Dimensions: 768,
+		}),
+		Storage:       store,
+		VectorStorage: vectors,
+		Strategies: []semanticsearch.StrategyFactory{
+			semanticsearch.NewMarkdownStrategy(),
+			semanticsearch.NewPDFStrategy(),
+			semanticsearch.NewCodeStrategy(),
+			semanticsearch.NewDocxStrategy(),
+			semanticsearch.NewTextStrategy(),
+		},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	// Index the directory, then run a meaning-based search, exactly as in the SQLite example.
+	if err := engine.Index(ctx, "./docs", semanticsearch.IndexOptions{}); err != nil {
+		panic(err)
+	}
+
+	results, _ := engine.Search(ctx, "how do I detect security threats in logs", 5)
+	for _, r := range results {
+		fmt.Printf("%s  (score %.4f)\n%s\n", r.Title, r.Score, r.Text)
+	}
+}
+```
+
+The pgvector driver is pure Go, so a Postgres-only build (importing neither SQLite store) needs
+no cgo and no C compiler.
+
 ## Documents
 
 ### Reference

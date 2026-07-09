@@ -1,0 +1,19 @@
+# PostgreSQL with the pgvector extension, for developing and testing the postgres/pgvector
+# stores. Start it with: docker compose -f test/docker/docker-compose.yml up -d
+# Then point the stores at:
+#   postgres://semanticsearch:semanticsearch@127.0.0.1:5432/semanticsearch?sslmode=disable
+name: semantic-search
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: semanticsearch
+      POSTGRES_PASSWORD: semanticsearch
+      POSTGRES_DB: semanticsearch
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U semanticsearch"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
