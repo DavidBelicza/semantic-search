@@ -55,7 +55,7 @@ Package moves (each moved as a whole unit):
 | Embedder injection | Facade strategy constructors are factories; `NewEngine` builds each strategy with the injected embedder (`general.NewGeneralStrategy(embedder)`), keeping `Embed` and `Claims` unchanged | 1 | todo |
 | Embedder API | `NewAiEmbedder(AiEmbedderConfig{Standard, BaseURL, Model, Dimensions})` with typed `StandardOpenAI` const | 1 | done |
 | Dup validation | Facade constructors carry each built-in's extensions (custom strategies supply their own); `NewEngine` errors on duplicate extensions | 1 | todo |
-| Store constructors | Per-type: `NewSQLiteStorage(path)`, `NewSQLiteVectorStorage(path)` (returning `core/storage` interfaces) | 1 | todo |
+| Store constructors | Per-type: `NewSQLiteStorage(ctx, path)`, `NewSQLiteVectorStorage(ctx, path, dimensions)` (returning `core/storage` interfaces) | 1 | done |
 | Strategy constructors | Factories: `NewMarkdownStrategy()`, `NewPDFStrategy()`, `NewCodeStrategy()`, `NewDocxStrategy()`, `NewTextStrategy()` | 1 | todo |
 | Facade | Root `semanticsearch` package absorbs `pkg/`: `Index`/`Search` become `Engine` methods, `build.go` wiring splits into `NewEngine` + the constructors, and `IndexOptions`/`SearchResult` move here. Consumers import `core/*` directly for interfaces (no aliases) | 1 | todo |
 | Remove CLI | After `pkg/` logic has migrated to the facade, delete `pkg/`, `cmd/`, `main.go`; drop cobra / pflag / mousetrap from `go.mod` | 1 | todo |
