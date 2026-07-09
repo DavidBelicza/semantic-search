@@ -58,7 +58,7 @@ Package moves (each moved as a whole unit):
 | Store constructors | Per-type: `NewSQLiteStorage(ctx, path)`, `NewSQLiteVectorStorage(ctx, path, dimensions)` (returning `core/storage` interfaces) | 1 | done |
 | Strategy constructors | Factories: `NewMarkdownStrategy()`, `NewPDFStrategy()`, `NewCodeStrategy()`, `NewDocxStrategy()`, `NewTextStrategy()` | 1 | done |
 | Facade | Root `semanticsearch` package absorbs `pkg/`: `Index`/`Search` become `Engine` methods, `build.go` wiring splits into `NewEngine` + the constructors, and `IndexOptions`/`SearchResult` move here. Consumers import `core/*` directly for interfaces (no aliases). *(Engine added; old package-level `Index`/`Search`/`build.go` removed in the next step.)* | 1 | done |
-| Remove CLI | After `pkg/` logic has migrated to the facade, delete `pkg/`, `cmd/`, `main.go`; drop cobra / pflag / mousetrap from `go.mod` | 1 | todo |
+| Remove CLI | After `pkg/` logic has migrated to the facade, delete `pkg/`, `cmd/`, `main.go`; drop cobra / pflag / mousetrap from `go.mod` | 1 | done |
 | E2E tests | Replace the CLI harness: deterministic e2e (fake embedder) + live e2e (real server, env-gated) | 1 | todo |
 | Postgres store | `core/storage/postgres` implementing `Storage` (CGO-free path when sqlite isn't imported) | 2 | todo |
 | pgvector | `VectorStorage` on pgvector; document split-DB (metadata and vectors in separate databases) | 2 | todo |

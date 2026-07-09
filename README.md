@@ -47,26 +47,63 @@ make lint        # golangci-lint
 
 ## Usage
 
-Index a directory:
+Semantic Search is a library. Compose an engine from an embedder, a metadata store, a vector
+store, and the strategies you want, then index a directory and search it:
 
-```sh
-semantic-search index ./path/to/files
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+
+	semanticsearch "github.com/davidbelicza/semantic-search"
+)
+
+func main() {
+	ctx := context.Background()
+
+	store, _ := semanticsearch.NewSQLiteStorage(ctx, "index.db")
+	defer store.Close()
+	vectors, _ := semanticsearch.NewSQLiteVectorStorage(ctx, "vectors.db", 768)
+	defer vectors.Close()
+
+	engine, err := semanticsearch.NewEngine(semanticsearch.Config{
+		Embedder: semanticsearch.NewAiEmbedder(semanticsearch.AiEmbedderConfig{
+			Standard:   semanticsearch.StandardOpenAI,
+			BaseURL:    "http://127.0.0.1:1234",
+			Model:      "text-embedding-embeddinggemma-300m-qat",
+			Dimensions: 768,
+		}),
+		Storage:       store,
+		VectorStorage: vectors,
+		Strategies: []semanticsearch.StrategyFactory{
+			semanticsearch.NewMarkdownStrategy(),
+			semanticsearch.NewPDFStrategy(),
+			semanticsearch.NewCodeStrategy(),
+			semanticsearch.NewDocxStrategy(),
+			semanticsearch.NewTextStrategy(),
+		},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	if err := engine.Index(ctx, "./docs", semanticsearch.IndexOptions{}); err != nil {
+		panic(err)
+	}
+
+	results, _ := engine.Search(ctx, "how do I detect security threats in logs", 5)
+	for _, r := range results {
+		fmt.Printf("%s  (score %.4f)\n%s\n", r.Title, r.Score, r.Text)
+	}
+}
 ```
 
-Search (arguments: result limit, then query):
-
-```sh
-semantic-search search 5 "how do I detect security threats in logs"
-```
-
-Common flags:
-
-- `--db <path>`: SQLite database path (default `vector-index.db`).
-- `--include-hidden`: index hidden files and directories.
-- `--follow-symlinks`: follow symbolic links.
-- `--fail-fast`: abort on the first document error instead of continuing.
-
-Re-running `index` is incremental: unchanged files (by content hash) are not re-embedded.
+Point the two stores at different paths to keep vectors in a separate database. Bring your own
+`storage.Storage`, `storage.VectorStorage`, `strategy.Embedder`, or `strategy.Strategy`
+implementation to swap any part. Re-running `Index` is incremental: unchanged files (by content
+hash) are not re-embedded.
 
 ## Documents
 
