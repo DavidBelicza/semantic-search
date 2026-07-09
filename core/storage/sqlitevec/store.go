@@ -31,12 +31,8 @@ func init() {
 	sqlite_vec.Auto()
 }
 
-// VectorHit is one nearest-neighbour match: the chunk id and its distance from the
-// query vector (lower is closer).
-type VectorHit struct {
-	ChunkID  int64
-	Distance float64
-}
+// Store satisfies storage.VectorStorage.
+var _ storage.VectorStorage = (*Store)(nil)
 
 type Store struct {
 	db         *sql.DB
@@ -146,7 +142,7 @@ func insertEmbeddings(ctx context.Context, tx *sql.Tx, embeddings []storage.Chun
 
 // Search returns the limit nearest chunk vectors to the query, closest first. The query
 // is normalized so that L2 distance ranks the same as cosine similarity.
-func (s *Store) Search(ctx context.Context, query []float32, limit int) ([]VectorHit, error) {
+func (s *Store) Search(ctx context.Context, query []float32, limit int) ([]storage.VectorHit, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -169,9 +165,9 @@ func (s *Store) Search(ctx context.Context, query []float32, limit int) ([]Vecto
 	}
 	defer rows.Close()
 
-	var hits []VectorHit
+	var hits []storage.VectorHit
 	for rows.Next() {
-		var hit VectorHit
+		var hit storage.VectorHit
 		if err := rows.Scan(&hit.ChunkID, &hit.Distance); err != nil {
 			return nil, err
 		}

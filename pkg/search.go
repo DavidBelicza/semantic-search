@@ -8,7 +8,6 @@ import (
 
 	"github.com/davidbelicza/semantic-search/core/embedder"
 	"github.com/davidbelicza/semantic-search/core/storage"
-	"github.com/davidbelicza/semantic-search/core/storage/sqlitevec"
 )
 
 // SearchResult is one chunk match: the document it belongs to, the chunk id, its title
@@ -26,7 +25,7 @@ type searchMetadataStore interface {
 }
 
 type searchVectorStore interface {
-	Search(ctx context.Context, query []float32, limit int) ([]sqlitevec.VectorHit, error)
+	Search(ctx context.Context, query []float32, limit int) ([]storage.VectorHit, error)
 }
 
 type queryEmbedder interface {
@@ -86,7 +85,7 @@ func search(ctx context.Context, store searchMetadataStore, vectorStore searchVe
 	return buildSearchResults(hits, metadata), nil
 }
 
-func hitChunkIDs(hits []sqlitevec.VectorHit) []int64 {
+func hitChunkIDs(hits []storage.VectorHit) []int64 {
 	ids := make([]int64, len(hits))
 	for i, hit := range hits {
 		ids[i] = hit.ChunkID
@@ -95,7 +94,7 @@ func hitChunkIDs(hits []sqlitevec.VectorHit) []int64 {
 	return ids
 }
 
-func buildSearchResults(hits []sqlitevec.VectorHit, metadata []storage.ChunkMetadata) []SearchResult {
+func buildSearchResults(hits []storage.VectorHit, metadata []storage.ChunkMetadata) []SearchResult {
 	byID := make(map[int64]storage.ChunkMetadata, len(metadata))
 	for _, item := range metadata {
 		byID[item.ChunkID] = item

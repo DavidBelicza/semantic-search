@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/davidbelicza/semantic-search/core/storage"
-	"github.com/davidbelicza/semantic-search/core/storage/sqlitevec"
 )
 
 type fakeMetadataStore struct {
@@ -17,11 +16,11 @@ func (f fakeMetadataStore) ChunkMetadataByIDs(_ context.Context, _ []int64) ([]s
 }
 
 type fakeVectorSearch struct {
-	hits     []sqlitevec.VectorHit
+	hits     []storage.VectorHit
 	gotLimit int
 }
 
-func (f *fakeVectorSearch) Search(_ context.Context, _ []float32, limit int) ([]sqlitevec.VectorHit, error) {
+func (f *fakeVectorSearch) Search(_ context.Context, _ []float32, limit int) ([]storage.VectorHit, error) {
 	f.gotLimit = limit
 	return f.hits, nil
 }
@@ -36,7 +35,7 @@ func TestSearchResolvesHitsToMetadataInOrder(t *testing.T) {
 	metaStore := fakeMetadataStore{metadata: []storage.ChunkMetadata{
 		{ChunkID: 7, DocumentID: 42, Title: "Payments", Text: "pay the invoice"},
 	}}
-	vectorStore := &fakeVectorSearch{hits: []sqlitevec.VectorHit{{ChunkID: 7, Distance: 0.5}}}
+	vectorStore := &fakeVectorSearch{hits: []storage.VectorHit{{ChunkID: 7, Distance: 0.5}}}
 
 	results, err := search(context.Background(), metaStore, vectorStore, fakeQueryEmbedder{}, "invoice", 5)
 	if err != nil {

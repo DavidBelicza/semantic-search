@@ -13,6 +13,9 @@ import (
 	storage "github.com/davidbelicza/semantic-search/core/storage"
 )
 
+// Store satisfies storage.Storage.
+var _ storage.Storage = (*Store)(nil)
+
 type Store struct {
 	db *sql.DB
 }
