@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/davidbelicza/semantic-search/internal/storage"
-	"github.com/davidbelicza/semantic-search/internal/strategy"
+	"github.com/davidbelicza/semantic-search/core/storage"
+	"github.com/davidbelicza/semantic-search/core/strategy"
 )
 
 const processBatchSize = 1
 
-// ProcessStore is the database surface the process pipeline reads and writes.
+// ProcessStore is the metadata surface the process pipeline needs — a subset of
+// storage.Storage, which any injected store satisfies.
 type ProcessStore interface {
 	DocumentsByStatus(ctx context.Context, status string, afterID int64, limit int) ([]storage.Document, error)
 	ApplyDocumentChunkReconcile(ctx context.Context, documentID int64, plan storage.ChunkReconcilePlan) ([]storage.Chunk, error)
@@ -21,8 +22,9 @@ type ProcessStore interface {
 	MarkDocumentEmbedded(ctx context.Context, fileID string, contentHash string) error
 }
 
-// VectorStore is the write surface of the vector index.
-type VectorStore interface {
+// ProcessVectorStore is the vector write surface the process pipeline needs — a subset of
+// storage.VectorStorage.
+type ProcessVectorStore interface {
 	Delete(ctx context.Context, chunkIDs []int64) error
 	Replace(ctx context.Context, embeddings []storage.ChunkEmbedding) error
 }
@@ -31,7 +33,7 @@ type VectorStore interface {
 // runs the strategy's parse → chunk → embed steps, and owns the reconciliation, status
 // transitions, and vector writes between them. Documents left in the chunked state (a
 // previous run that embedded partially) are then embedded.
-func Process(ctx context.Context, store ProcessStore, vectorStore VectorStore, pool strategy.Pool, failFast bool) error {
+func Process(ctx context.Context, store ProcessStore, vectorStore ProcessVectorStore, pool strategy.Pool, failFast bool) error {
 	run := processor{store: store, vectorStore: vectorStore, pool: pool}
 
 	if err := run.byStatus(ctx, storage.DocumentStatusScanned, failFast, run.processScanned); err != nil {
@@ -45,7 +47,7 @@ func Process(ctx context.Context, store ProcessStore, vectorStore VectorStore, p
 // private detail — the pipeline's public surface is the Process function.
 type processor struct {
 	store       ProcessStore
-	vectorStore VectorStore
+	vectorStore ProcessVectorStore
 	pool        strategy.Pool
 }
 

@@ -1,7 +1,7 @@
 # Format support — roadmap
 
 Planned and completed file-format strategies. Each format is a strategy subpackage under
-`internal/strategy/` that embeds `GeneralStrategy` and overrides only what it needs
+`core/strategy/` that embeds `GeneralStrategy` and overrides only what it needs
 (`Claims`, `Parse`, and `Chunk` when the format chunks differently). Adding one touches no
 other layer — see [architecture.md](architecture.md).
 
@@ -50,16 +50,16 @@ Package moves (each moved as a whole unit):
 
 | Step | Change | Phase | Status |
 |---|---|---|---|
-| Move to core | Move whole packages `internal/{embedder,storage,strategy}` → `core/{embedder,storage,strategy}`; update import paths; `internal/{fs,pipeline,textproc}` stay | 1 | todo |
-| Store interfaces | Define `Storage` (metadata/chunks) and `VectorStorage` interfaces in `core/storage` from the current sqlite/sqlitevec methods; pipeline depends on the interfaces, not concrete stores | 1 | todo |
-| Embedder injection | Facade strategy constructors are factories; `NewEngine` builds each strategy with the injected embedder (`general.NewGeneralStrategy(embedder)`), keeping `Embed` and `Claims` unchanged | 1 | todo |
-| Embedder API | `NewAiEmbedder(AiEmbedderConfig{Standard, BaseURL, Model, Dimensions})` with typed `StandardOpenAI` const | 1 | todo |
-| Dup validation | Facade constructors carry each built-in's extensions (custom strategies supply their own); `NewEngine` errors on duplicate extensions | 1 | todo |
-| Store constructors | Per-type: `NewSQLiteStorage(path)`, `NewSQLiteVectorStorage(path)` (returning `core/storage` interfaces) | 1 | todo |
-| Strategy constructors | Factories: `NewMarkdownStrategy()`, `NewPDFStrategy()`, `NewCodeStrategy()`, `NewDocxStrategy()`, `NewTextStrategy()` | 1 | todo |
-| Facade | Root `semanticsearch` package absorbs `pkg/`: `Index`/`Search` become `Engine` methods, `build.go` wiring splits into `NewEngine` + the constructors, and `IndexOptions`/`SearchResult` move here. Consumers import `core/*` directly for interfaces (no aliases) | 1 | todo |
-| Remove CLI | After `pkg/` logic has migrated to the facade, delete `pkg/`, `cmd/`, `main.go`; drop cobra / pflag / mousetrap from `go.mod` | 1 | todo |
-| E2E tests | Replace the CLI harness: deterministic e2e (fake embedder) + live e2e (real server, env-gated) | 1 | todo |
+| Move to core | Move whole packages `internal/{embedder,storage,strategy}` → `core/{embedder,storage,strategy}`; update import paths; `internal/{fs,pipeline,textproc}` stay | 1 | done |
+| Store interfaces | Define `Storage` (metadata/chunks) and `VectorStorage` interfaces in `core/storage` from the current sqlite/sqlitevec methods; pipeline depends on the interfaces, not concrete stores | 1 | done |
+| Embedder injection | Facade strategy constructors are factories; `NewEngine` builds each strategy with the injected embedder (`general.NewGeneralStrategy(embedder)`), keeping `Embed` and `Claims` unchanged | 1 | done |
+| Embedder API | `NewAiEmbedder(AiEmbedderConfig{Standard, BaseURL, Model, Dimensions})` with typed `StandardOpenAI` const | 1 | done |
+| Dup validation | Facade constructors carry each built-in's extensions (custom strategies supply their own); `NewEngine` errors on duplicate extensions | 1 | done |
+| Store constructors | Per-type: `NewSQLiteStorage(ctx, path)`, `NewSQLiteVectorStorage(ctx, path, dimensions)` (returning `core/storage` interfaces) | 1 | done |
+| Strategy constructors | Factories: `NewMarkdownStrategy()`, `NewPDFStrategy()`, `NewCodeStrategy()`, `NewDocxStrategy()`, `NewTextStrategy()` | 1 | done |
+| Facade | Root `semanticsearch` package absorbs `pkg/`: `Index`/`Search` become `Engine` methods, `build.go` wiring splits into `NewEngine` + the constructors, and `IndexOptions`/`SearchResult` move here. Consumers import `core/*` directly for interfaces (no aliases). *(Engine added; old package-level `Index`/`Search`/`build.go` removed in the next step.)* | 1 | done |
+| Remove CLI | After `pkg/` logic has migrated to the facade, delete `pkg/`, `cmd/`, `main.go`; drop cobra / pflag / mousetrap from `go.mod` | 1 | done |
+| E2E tests | Black-box example test: full composition with an in-process hashing embedder (no server), indexing text/markdown/code/docx fixtures and asserting retrieval — runs in CI | 1 | done |
 | Postgres store | `core/storage/postgres` implementing `Storage` (CGO-free path when sqlite isn't imported) | 2 | todo |
 | pgvector | `VectorStorage` on pgvector; document split-DB (metadata and vectors in separate databases) | 2 | todo |
 | More embedders | Additional `Standard` values behind `NewAiEmbedder` (e.g. Cohere) | 2 | todo |

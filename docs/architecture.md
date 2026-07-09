@@ -12,20 +12,20 @@ cmd/                 CLI (cobra): index, search. Parses input, proxies to pkg.
 pkg/                 bootstrapper (package semanticsearch): builds the object graph
                      and runs the pipelines. Public API: Index, Search.
 internal/pipeline    the flow — functions that move between files
-internal/strategy    the per-file contract (Strategy interface) + Pool; concrete
+core/strategy        the per-file contract (Strategy interface) + Pool; concrete
                      strategies live in subpackages:
                        strategy/general   base structured strategy + chunking engine
                        strategy/markdown  Markdown parsing/chunking
                        strategy/pdf       PDF parsing (PDFium) + font-based sections
                        strategy/code      code parsing (Chroma lexer) + definition sections
                        strategy/docx      DOCX parsing (zip + XML) + heading sections
-internal/storage     resource entities (Document, Chunk, …); no database code
+core/storage         resource entities (Document, Chunk, …); no database code
   storage/sqlite     documents + chunks tables (source of truth)
   storage/sqlitevec  sqlite-vec vectors
 internal/textproc    generic, dependency-free text utilities (split, window, tokens,
                      hash, normalize, part packing, heading-path stack)
 internal/fs          stable file identity (device + inode)
-internal/embedder    the embedding client (EmbeddingGemma via LM Studio)
+core/embedder        the embedding client (EmbeddingGemma via LM Studio)
 ```
 
 Rule of thumb: `internal/*` provides the parts, `pkg` assembles them, `cmd` exposes them,
@@ -35,7 +35,7 @@ nothing of ours; strategies depend on both; the pipeline depends on the strategy
 ## Strategy — the per-file recipe
 
 A `Strategy` owns the complete life of a single file and does no file I/O or directory
-walking (the pipeline hands it the bytes). Interface (`internal/strategy`):
+walking (the pipeline hands it the bytes). Interface (`core/strategy`):
 
 ```
 Claims(path) bool
@@ -87,12 +87,12 @@ short-circuited (fingerprint match) so they are never re-chunked or re-embedded.
 ## Storage
 
 The resource entities (`Document`, `Chunk`, `ChunkEmbedding`, `FileMetadata`, status
-constants) live in `internal/storage` and depend on no database, so business logic can
+constants) live in `core/storage` and depend on no database, so business logic can
 reference the model without coupling to a store. One SQLite file holds the data:
 
-- `internal/storage/sqlite` — `documents` and `chunks` tables. Source of truth (chunk text
+- `core/storage/sqlite` — `documents` and `chunks` tables. Source of truth (chunk text
   lives here).
-- `internal/storage/sqlitevec` — a sqlite-vec `vec0` virtual table (`chunk_vectors`) with
+- `core/storage/sqlitevec` — a sqlite-vec `vec0` virtual table (`chunk_vectors`) with
   the embeddings. Search is exact KNN over unit-normalized vectors (L2 ranks as cosine).
   See [research/sqlite-vec-migration.md](research/sqlite-vec-migration.md) and
   [research/vector-search-scaling.md](research/vector-search-scaling.md).

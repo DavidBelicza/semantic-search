@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/davidbelicza/semantic-search/internal/storage"
-	"github.com/davidbelicza/semantic-search/internal/strategy"
+	"github.com/davidbelicza/semantic-search/core/storage"
+	"github.com/davidbelicza/semantic-search/core/strategy"
 )
 
 const (
@@ -28,7 +28,8 @@ type Options struct {
 	FollowSymlinks bool
 }
 
-// IndexStore is the database surface the index pipeline writes to.
+// IndexStore is the metadata surface the index pipeline needs — a subset of storage.Storage,
+// which any injected store (sqlite, Postgres, …) satisfies.
 type IndexStore interface {
 	UpsertDocuments(ctx context.Context, files []storage.FileMetadata) error
 	DocumentsByStatus(ctx context.Context, status string, afterID int64, limit int) ([]storage.Document, error)
