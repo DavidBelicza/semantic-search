@@ -119,6 +119,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+      # Build golangci-lint (v2, matching .golangci.yml) with this job's Go toolchain, so its
+      # build Go version is not older than the module's go directive.
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+
+      - name: Lint
+        run: $(go env GOPATH)/bin/golangci-lint run ./...
