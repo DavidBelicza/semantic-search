@@ -4,7 +4,28 @@
 
 <h1 align="center">Semantic Search</h1>
 
-<p align="center">A semantic search tool that <strong>recursively indexes</strong> PDF, Markdown, code, and many other file types in a directory, then <strong>chunks</strong> them and stores them in a <strong>vector database</strong> using an <strong>embedding AI model</strong>. It enables <strong>meaning-based search</strong> across your documents, working as a perfect backend, like a <strong>clone of Google NotebookLM's search engine</strong>.</p>
+<p align="center">
+  <a href="https://github.com/DavidBelicza/semantic-search/actions/workflows/ci.yml"><img src="https://github.com/DavidBelicza/semantic-search/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/DavidBelicza/semantic-search/releases"><img src="https://img.shields.io/github/v/release/DavidBelicza/semantic-search?sort=semver" alt="Release"></a>
+  <a href="https://pkg.go.dev/github.com/davidbelicza/semantic-search"><img src="https://pkg.go.dev/badge/github.com/davidbelicza/semantic-search.svg" alt="Go Reference"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/DavidBelicza/semantic-search" alt="License"></a>
+</p>
+
+<p align="center">This is a <strong>semantic search library</strong> inspired by <strong>Google's Discovery Engine</strong> (Google AI Search) and by the retrieval systems behind products like <strong>Google Search</strong> and <strong>NotebookLM</strong>.
+<br>It <strong>recursively indexes</strong> PDF, Markdown, code, and many other file types in a directory, then <strong>chunks</strong> them and stores them in a <strong>vector database</strong> using an <strong>embedding AI model</strong>.
+<br>It enables <strong>meaning-based search</strong> across your documents and works for both <strong>client-side</strong> and <strong>server-side</strong> solutions. Written in <strong>Go</strong>, it is <strong>portable</strong> and compiles easily to any platform, OS, client, or server.</p>
+
+## Use cases
+
+Semantic Search works both as an embedded engine inside client apps (using the SQLite store,
+on disk or in memory) and as a server-side knowledge base (using PostgreSQL and pgvector).
+
+| Target | Use case |
+|---|---|
+| Desktop apps | Client-side RAG over a personal knowledge base: Google NotebookLM-like search built into the app, backed by the embedded SQLite database. |
+| Mobile apps | The same personal knowledge base and meaning-based search running on-device, with no server, on the embedded SQLite database. |
+| CLI tools | Terminal-based semantic search over local files and notes, backed by the embedded SQLite database. |
+| Server-side | Meaning-based knowledge bases for web systems, for example integrating into webshops or product catalogs, backed by PostgreSQL and pgvector. |
 
 ## Supported formats
 
@@ -26,16 +47,17 @@
 
 ## Requirements
 
-- **Go**, and a **C compiler** so cgo can build `mattn/go-sqlite3` and the `sqlite-vec`
-  bindings from source. Install the compiler for your system:
+- **Every use case** needs an **OpenAI-compatible embedding server**: on your own machine (LM Studio, Ollama, or llama.cpp), or on a remote host (Google AI Studio or any other server that speaks the standard protocol).
+- **For client-side apps** (desktop, mobile, CLI), you also need a **C compiler**,
+  because cgo builds `mattn/go-sqlite3` and the `sqlite-vec` bindings from source:
   - **macOS**: `xcode-select --install` (Clang)
   - **Debian / Ubuntu**: `sudo apt install build-essential`
   - **Fedora / RHEL**: `sudo dnf install gcc`
   - **Windows**: install a MinGW-w64 gcc toolchain (e.g. via MSYS2) and add it to `PATH`
   - **Windows (alternative)**: use [WSL2](https://learn.microsoft.com/windows/wsl/install) and
     follow the Debian / Ubuntu steps inside your Linux distribution
-- An **OpenAI-compatible embedding server** on `http://127.0.0.1:1234` (e.g. LM Studio)
-  serving an embedding model such as EmbeddingGemma-300m (768-dim).
+- **For server-side apps**: pure Go, so no C compiler is needed. You need a **PostgreSQL server
+  with the pgvector extension** (`test/docker/docker-compose.yml` provides a working example).
 
 ## Install, build, test, lint
 
@@ -59,6 +81,10 @@ Semantic Search is a library. Copy the following into a Go file (for example `ma
 started: it composes an engine from an embedder, a metadata store, a vector store, and the
 strategies you want, then indexes a directory and searches it.
 
+### Full example
+
+For CLI, desktop, or mobile apps, the recommended setup is an embedded SQLite database.
+
 ```go
 package main
 
@@ -72,9 +98,9 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// Configure the search engine. You compose it from an embedder that turns text into
-	// vectors, a metadata store, a vector store, and the strategies that decide which file
-	// types are handled and how each one is parsed and chunked.
+	// Configure the search engine. You compose it from an embedder that turns text
+	// into vectors, a metadata store, a vector store, and the strategies that decide
+	// which file types are handled and how each one is parsed and chunked.
 	store, _ := semanticsearch.NewSQLiteStorage(ctx, "index.db")
 	defer store.Close()
 	vectors, _ := semanticsearch.NewSQLiteVectorStorage(ctx, "vectors.db", 768)
@@ -101,15 +127,16 @@ func main() {
 		panic(err)
 	}
 
-	// Index the directory. The engine maps the directory recursively, parses every supported
-	// file, splits each one into chunks, and embeds those chunks into vectors with the AI model.
+	// Index the directory. The engine maps the directory recursively, parses every
+	// supported file, splits each one into chunks, and embeds those chunks into
+	// vectors with the AI model.
 	if err := engine.Index(ctx, "./docs", semanticsearch.IndexOptions{}); err != nil {
 		panic(err)
 	}
 
-	// Search the indexed content. The query is embedded the same way, and the engine returns the
-	// chunks whose meaning is closest to it, so results are matched by meaning rather than exact
-	// keywords.
+	// Search the indexed content. The query is embedded the same way, and the engine
+	// returns the chunks whose meaning is closest to it, so results are matched by
+	// meaning rather than exact keywords.
 	results, _ := engine.Search(ctx, "how do I detect security threats in logs", 5)
 	for _, r := range results {
 		fmt.Printf("%s  (score %.4f)\n%s\n", r.Title, r.Score, r.Text)
@@ -117,211 +144,51 @@ func main() {
 }
 ```
 
-Point the two stores at different paths to keep vectors in a separate database. Alternatively,
-bring your own `storage.Storage`, `storage.VectorStorage`, `strategy.Embedder`, or
-`strategy.Strategy` implementation to swap any part. Re-running `Index` is a delta update: it
-compares each file's content hash and re-embeds only the changed files, skipping the rest.
-
 ### In-memory SQLite (single process)
 
-To keep everything in RAM instead of on disk, give both stores an in-memory SQLite DSN. The
-only change from the example above is the two store paths — the engine, indexing, and search
-are identical. Because the data lives only in this process, **you must index and search in the
-same run**: a later process starts from an empty database.
+Alternatively, give both stores an in-memory DSN to keep everything in RAM. Because the data lives only in this process, you must index and search in the same run. Only the two store lines change:
 
 ```go
-package main
-
-import (
-	"context"
-	"fmt"
-
-	"github.com/davidbelicza/semantic-search"
-)
-
-func main() {
-	ctx := context.Background()
-
-	// In-memory databases. "mode=memory&cache=shared" keeps one database shared across the
-	// connection pool; distinct names (meta, vec) keep the two stores apart. Nothing is
-	// written to disk, and everything is gone when this process exits.
-	store, _ := semanticsearch.NewSQLiteStorage(ctx, "file:meta?mode=memory&cache=shared")
-	defer store.Close()
-	vectors, _ := semanticsearch.NewSQLiteVectorStorage(ctx, "file:vec?mode=memory&cache=shared", 768)
-	defer vectors.Close()
-
-	engine, err := semanticsearch.NewEngine(semanticsearch.Config{
-		Embedder: semanticsearch.NewAiEmbedder(semanticsearch.AiEmbedderConfig{
-			Standard:   semanticsearch.StandardOpenAI,
-			BaseURL:    "http://127.0.0.1:1234",
-			Model:      "text-embedding-embeddinggemma-300m-qat",
-			Dimensions: 768,
-		}),
-		Storage:       store,
-		VectorStorage: vectors,
-		Strategies: []semanticsearch.StrategyFactory{
-			semanticsearch.NewMarkdownStrategy(),
-			semanticsearch.NewPDFStrategy(),
-			semanticsearch.NewCodeStrategy(),
-			semanticsearch.NewDocxStrategy(),
-			semanticsearch.NewTextStrategy(),
-		},
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	// Index and search happen in the same process, back to back, because the RAM-only
-	// database does not survive a restart.
-	if err := engine.Index(ctx, "./docs", semanticsearch.IndexOptions{}); err != nil {
-		panic(err)
-	}
-
-	results, _ := engine.Search(ctx, "how do I detect security threats in logs", 5)
-	for _, r := range results {
-		fmt.Printf("%s  (score %.4f)\n%s\n", r.Title, r.Score, r.Text)
-	}
-}
+store, _ := semanticsearch.NewSQLiteStorage(ctx, "file:meta?mode=memory&cache=shared")
+defer store.Close()
+vectors, _ := semanticsearch.NewSQLiteVectorStorage(ctx, "file:vec?mode=memory&cache=shared", 768)
+defer vectors.Close()
 ```
 
 ### Server-side setup with PostgreSQL and pgvector
 
-To store the index and vectors on a PostgreSQL server instead of local SQLite files, swap the
-two store constructors for their Postgres equivalents. The server must have the
-[pgvector](https://github.com/pgvector/pgvector) extension available; for local development a
-ready-to-use database is provided:
+You can run this library server-side. In that case it is recommended to switch to a multi-process SQL database by swapping the two store constructors for their PostgreSQL equivalents. The server must have the [pgvector](https://github.com/pgvector/pgvector) extension; for local development, a ready-to-use database is provided:
 
 ```sh
 docker compose -f test/docker/docker-compose.yml up -d
 ```
 
-Copy the following into a Go file (for example `main.go`). It is identical to the example above
-except that the two stores are backed by PostgreSQL and pgvector.
+Only the two store lines change:
 
 ```go
-package main
-
-import (
-	"context"
-	"fmt"
-
-	"github.com/davidbelicza/semantic-search"
-)
-
-func main() {
-	ctx := context.Background()
-
-	// Configure the search engine backed by a PostgreSQL server. The metadata store and the
-	// vector store can share one database or point at two different servers.
-	dsn := "postgres://semanticsearch:semanticsearch@127.0.0.1:5432/semanticsearch?sslmode=disable"
-
-	store, _ := semanticsearch.NewPostgresStorage(ctx, dsn)
-	defer store.Close()
-	vectors, _ := semanticsearch.NewPostgresVectorStorage(ctx, dsn, 768, semanticsearch.PostgresKNN)
-	defer vectors.Close()
-
-	engine, err := semanticsearch.NewEngine(semanticsearch.Config{
-		Embedder: semanticsearch.NewAiEmbedder(semanticsearch.AiEmbedderConfig{
-			Standard:   semanticsearch.StandardOpenAI,
-			BaseURL:    "http://127.0.0.1:1234",
-			Model:      "text-embedding-embeddinggemma-300m-qat",
-			Dimensions: 768,
-		}),
-		Storage:       store,
-		VectorStorage: vectors,
-		Strategies: []semanticsearch.StrategyFactory{
-			semanticsearch.NewMarkdownStrategy(),
-			semanticsearch.NewPDFStrategy(),
-			semanticsearch.NewCodeStrategy(),
-			semanticsearch.NewDocxStrategy(),
-			semanticsearch.NewTextStrategy(),
-		},
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	// Index the directory, then run a meaning-based search, exactly as in the SQLite example.
-	if err := engine.Index(ctx, "./docs", semanticsearch.IndexOptions{}); err != nil {
-		panic(err)
-	}
-
-	results, _ := engine.Search(ctx, "how do I detect security threats in logs", 5)
-	for _, r := range results {
-		fmt.Printf("%s  (score %.4f)\n%s\n", r.Title, r.Score, r.Text)
-	}
-}
+dsn := "postgres://semanticsearch:semanticsearch@127.0.0.1:5432/semanticsearch?sslmode=disable"
+store, _ := semanticsearch.NewPostgresStorage(ctx, dsn)
+defer store.Close()
+vectors, _ := semanticsearch.NewPostgresVectorStorage(ctx, dsn, 768, semanticsearch.PostgresKNN)
+defer vectors.Close()
 ```
 
 The pgvector driver is pure Go, so a Postgres-only build (importing neither SQLite store) needs
 no cgo and no C compiler.
 
-### Approximate search at scale with HNSW
+### Scaling up with HNSW
 
-Exact search (`PostgresKNN`) compares the query against every vector, which stays fast up to a
-few hundred thousand vectors. Beyond that, switch the vector store to `PostgresHNSW`: it builds
-an [HNSW](https://github.com/pgvector/pgvector#hnsw) index for approximate nearest-neighbor
-search, which is sub-linear and much faster at large scale, trading a little recall for speed.
-Only the vector store constructor changes — everything else is identical.
+If your vector database runs on the server side, you can reasonably scale it up. To do that, use `PostgresHNSW` instead of `PostgresKNN`: it builds an [HNSW](https://github.com/pgvector/pgvector#hnsw) index for approximate nearest-neighbor search, which is sub-linear and much faster at scale. Only the vector store line changes:
 
 ```go
-package main
-
-import (
-	"context"
-	"fmt"
-
-	"github.com/davidbelicza/semantic-search"
-)
-
-func main() {
-	ctx := context.Background()
-	dsn := "postgres://semanticsearch:semanticsearch@127.0.0.1:5432/semanticsearch?sslmode=disable"
-
-	store, _ := semanticsearch.NewPostgresStorage(ctx, dsn)
-	defer store.Close()
-	// PostgresHNSW builds an HNSW index for approximate search at large scale.
-	vectors, _ := semanticsearch.NewPostgresVectorStorage(ctx, dsn, 768, semanticsearch.PostgresHNSW)
-	defer vectors.Close()
-
-	engine, err := semanticsearch.NewEngine(semanticsearch.Config{
-		Embedder: semanticsearch.NewAiEmbedder(semanticsearch.AiEmbedderConfig{
-			Standard:   semanticsearch.StandardOpenAI,
-			BaseURL:    "http://127.0.0.1:1234",
-			Model:      "text-embedding-embeddinggemma-300m-qat",
-			Dimensions: 768,
-		}),
-		Storage:       store,
-		VectorStorage: vectors,
-		Strategies: []semanticsearch.StrategyFactory{
-			semanticsearch.NewMarkdownStrategy(),
-			semanticsearch.NewPDFStrategy(),
-			semanticsearch.NewCodeStrategy(),
-			semanticsearch.NewDocxStrategy(),
-			semanticsearch.NewTextStrategy(),
-		},
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	if err := engine.Index(ctx, "./docs", semanticsearch.IndexOptions{}); err != nil {
-		panic(err)
-	}
-
-	results, _ := engine.Search(ctx, "how do I detect security threats in logs", 5)
-	for _, r := range results {
-		fmt.Printf("%s  (score %.4f)\n%s\n", r.Title, r.Score, r.Text)
-	}
-}
+vectors, _ := semanticsearch.NewPostgresVectorStorage(ctx, dsn, 768, semanticsearch.PostgresHNSW)
 ```
 
 ### Custom embedder
 
 The built-in `NewAiEmbedder` speaks the OpenAI-compatible protocol with an optional `APIKey`
-(sent as a Bearer token). For anything it does not cover — rotating OAuth tokens (e.g. Vertex
-AI), request signing (e.g. AWS Bedrock), or a non-OpenAI wire format — implement the embedder
-interface yourself and inject it. It is a single method:
+(sent as a Bearer token). For anything it does not cover, such as rotating OAuth tokens (e.g. production Vertex AI), request signing (e.g. AWS Bedrock), or a non-OpenAI wire format, implement the
+embedder interface yourself and inject it. It is a single method:
 
 ```go
 type myEmbedder struct {

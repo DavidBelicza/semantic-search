@@ -102,3 +102,23 @@ jobs:
 
       - name: Test (postgres + pgvector + e2e)
         run: go test ./core/storage/postgres/ ./core/storage/pgvector/ ./test/e2e/
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install sqlite headers
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
