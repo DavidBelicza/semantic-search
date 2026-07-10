@@ -56,6 +56,25 @@ func TestOpenAIEmbedderPostsWithoutBearerToken(t *testing.T) {
 	}
 }
 
+func TestOpenAIEmbedderSendsBearerToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+			t.Fatalf("authorization header mismatch: want %q, got %q", "Bearer test-key", got)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data": [{"index": 0, "embedding": [0.1, 0.2]}]}`))
+	}))
+	defer server.Close()
+
+	embedder := NewOpenAIEmbedder(server.URL, "test-model")
+	embedder.APIKey = "test-key"
+	if _, err := embedder.Embed(context.Background(), []string{"hello"}); err != nil {
+		t.Fatalf("embed: %v", err)
+	}
+}
+
 func TestOpenAIEmbedderPostsArbitraryMarkdownContentAsText(t *testing.T) {
 	input := strings.Join([]string{
 		"```json",

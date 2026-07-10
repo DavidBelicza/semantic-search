@@ -8,10 +8,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/davidbelicza/semantic-search/core/embedder"
 	"github.com/davidbelicza/semantic-search/core/storage"
+	"github.com/davidbelicza/semantic-search/core/storage/pgvector"
+	"github.com/davidbelicza/semantic-search/core/storage/postgres"
 	"github.com/davidbelicza/semantic-search/core/storage/sqlite"
 	"github.com/davidbelicza/semantic-search/core/storage/sqlitevec"
 	"github.com/davidbelicza/semantic-search/core/strategy"
@@ -154,6 +158,11 @@ type AiEmbedderConfig struct {
 	BaseURL    string
 	Model      string
 	Dimensions int
+	// APIKey is optional. When set it is sent as an "Authorization: Bearer <APIKey>" header
+	// for hosted endpoints; leave it empty for local servers that need no authentication.
+	APIKey string
+	// Timeout is optional per-request timeout for embedding calls. Zero uses the default.
+	Timeout time.Duration
 }
 
 // NewAiEmbedder builds an embedder for the given standard. It returns nil for an unknown
@@ -166,6 +175,10 @@ func NewAiEmbedder(config AiEmbedderConfig) strategy.Embedder {
 	client := embedder.NewOpenAIEmbedder(config.BaseURL, config.Model)
 	if config.Dimensions > 0 {
 		client.Dimensions = config.Dimensions
+	}
+	client.APIKey = config.APIKey
+	if config.Timeout > 0 {
+		client.HTTPClient = &http.Client{Timeout: config.Timeout}
 	}
 
 	return client
@@ -195,6 +208,48 @@ func NewSQLiteStorage(ctx context.Context, path string) (storage.Storage, error)
 // keep vectors in a separate database.
 func NewSQLiteVectorStorage(ctx context.Context, path string, dimensions int) (storage.VectorStorage, error) {
 	store, err := sqlitevec.Open(ctx, path, dimensions)
+	if err != nil {
+		return nil, err
+	}
+
+	return store, nil
+}
+
+// NewPostgresStorage opens a PostgreSQL metadata store at dsn (e.g.
+// "postgres://user:pass@host:5432/db?sslmode=disable") and prepares its schema. It uses the
+// pure-Go pgx driver, so a Postgres-only build needs no cgo.
+func NewPostgresStorage(ctx context.Context, dsn string) (storage.Storage, error) {
+	store, err := postgres.Open(dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := store.EnsureSchema(ctx); err != nil {
+		store.Close()
+		return nil, err
+	}
+
+	return store, nil
+}
+
+// PostgresVectorIndex selects how the pgvector store searches.
+type PostgresVectorIndex string
+
+const (
+	// PostgresKNN is exact brute-force k-nearest-neighbor search (a sequential scan, 100%
+	// recall). Best below a few hundred thousand vectors.
+	PostgresKNN PostgresVectorIndex = "knn"
+	// PostgresHNSW is approximate nearest-neighbor search backed by an HNSW index
+	// (sub-linear, trades some recall for speed). Best at large scale.
+	PostgresHNSW PostgresVectorIndex = "hnsw"
+)
+
+// NewPostgresVectorStorage opens a pgvector vector store at dsn, sized to the embedding
+// dimensions, and prepares its schema. The server must have the pgvector extension available.
+// The index selects exact (PostgresKNN) or approximate (PostgresHNSW) search. Point it at a
+// different dsn than the metadata store to keep vectors in a separate database.
+func NewPostgresVectorStorage(ctx context.Context, dsn string, dimensions int, index PostgresVectorIndex) (storage.VectorStorage, error) {
+	store, err := pgvector.Open(ctx, dsn, dimensions, index == PostgresHNSW)
 	if err != nil {
 		return nil, err
 	}
