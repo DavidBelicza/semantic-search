@@ -1,0 +1,31 @@
+package embedder
+
+import "github.com/davidbelicza/semantic-search/core/storage"
+
+// GeneralModel is a template-free model: it embeds the raw chunk and query text, with no
+// model-specific prompt formatting. Its id and vector size are supplied by the caller, so
+// switching to a different OpenAI-standard model — or a different vector size of the same one —
+// needs no new type, just a different constructor call.
+type GeneralModel struct {
+	name       string
+	dimensions int
+}
+
+// NewGeneralModel builds a template-free model with the given model id and vector size.
+func NewGeneralModel(name string, dimensions int) GeneralModel {
+	return GeneralModel{name: name, dimensions: dimensions}
+}
+
+func (m GeneralModel) Name() string { return m.name }
+
+func (m GeneralModel) Dimensions() int { return m.dimensions }
+
+// BuildData embeds the chunk's text as-is, without the title or any prompt template.
+func (GeneralModel) BuildData(chunk storage.Chunk) string {
+	return chunk.Text
+}
+
+// BuildQuery embeds the query unchanged.
+func (GeneralModel) BuildQuery(query string) string {
+	return query
+}

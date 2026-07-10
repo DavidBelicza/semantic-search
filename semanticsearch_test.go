@@ -129,9 +129,20 @@ func TestNewAiEmbedderUnknownStandardIsNil(t *testing.T) {
 	}
 }
 
-func TestNewModelUnknownIsNil(t *testing.T) {
-	if NewModel("nope") != nil {
-		t.Fatal("expected nil for an unknown model")
+func TestNewModelUnlistedReturnsGeneralModel(t *testing.T) {
+	m := NewModel("text-embedding-nomic-embed-text-v1.5", 768)
+	if m == nil {
+		t.Fatal("expected a general model for an unlisted model id")
+	}
+	if m.Name() != "text-embedding-nomic-embed-text-v1.5" || m.Dimensions() != 768 {
+		t.Fatalf("general model not configured: name=%q dims=%d", m.Name(), m.Dimensions())
+	}
+}
+
+func TestNewGeneralModel(t *testing.T) {
+	m := NewGeneralModel("text-embedding-nomic-embed-text-v1.5", 512)
+	if m.Name() != "text-embedding-nomic-embed-text-v1.5" || m.Dimensions() != 512 {
+		t.Fatalf("general model not configured: name=%q dims=%d", m.Name(), m.Dimensions())
 	}
 }
 

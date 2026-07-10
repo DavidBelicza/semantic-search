@@ -186,14 +186,19 @@ vectors, _ := semanticsearch.NewPostgresVectorStorage(ctx, dsn, 768, semanticsea
 
 ### Choosing an embedder model
 
-The model interface defines the model's name, dimension size, data structure format, and search query format.
-The example uses Gemma, which has 300 million parameters and 768 dimensions. It is a reasonable embedder model that can run locally.
+The model interface defines the model's name, dimension size, data structure format, and search query format. The example uses Gemma, which has 300 million parameters and 768 dimensions. It is a reasonable embedder model that can run locally. **Changing models can significantly impact your application’s performance.**
 
 ```go
 model := semanticsearch.NewModel(semanticsearch.Gemma300mQAT)
 ```
 
-For a custom model, or any model that is not listed in this library, you can implement the `EmbeddingModel` interface and inject it. This is a basic example of implementing a new `EmbeddingModel`.
+For any other model that needs no prompt templates, use `NewGeneralModel` with the model id and vector size. Switching models or dimensions is just a different argument.
+
+```go
+model := semanticsearch.NewGeneralModel("text-embedding-nomic-embed-text-v1.5", 768)
+```
+
+If a model needs its own prompt templates, implement the `EmbeddingModel` interface and inject it.
 
 ```go
 type myModel struct{}

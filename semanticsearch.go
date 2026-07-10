@@ -155,14 +155,28 @@ type PredefinedModel string
 const Gemma300mQAT PredefinedModel = "gemma-300m-qat"
 
 // NewModel builds the model knowledge (id, dimensions, prompt templates) for a predefined
-// model. It returns nil for an unknown model; NewEngine rejects a nil model.
-func NewModel(model PredefinedModel) strategy.EmbeddingModel {
-	switch model {
-	case Gemma300mQAT:
+// model. Any value that is not a predefined constant is treated as a raw model id and returned
+// as a template-free GeneralModel with the given dimensions. The dimensions argument is
+// optional and ignored for predefined models that have a fixed vector size (e.g. Gemma); supply
+// it only for an unlisted model id.
+func NewModel(model PredefinedModel, dimensions ...int) strategy.EmbeddingModel {
+	if model == Gemma300mQAT {
 		return embedder.GemmaModel{}
-	default:
-		return nil
 	}
+
+	dim := 0
+	if len(dimensions) > 0 {
+		dim = dimensions[0]
+	}
+
+	return embedder.NewGeneralModel(string(model), dim)
+}
+
+// NewGeneralModel builds a template-free model with the given model id and vector size, for any
+// OpenAI-standard model that needs no prompt templates. Switching models or vector sizes is
+// then just a different call, with no new type to implement.
+func NewGeneralModel(name string, dimensions int) strategy.EmbeddingModel {
+	return embedder.NewGeneralModel(name, dimensions)
 }
 
 // --- Embedder ---
