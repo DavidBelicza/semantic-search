@@ -20,7 +20,7 @@ const (
 	DefaultBackoffMax     = 5 * time.Second
 )
 
-type OpenAIEmbedder struct {
+type OpenAIClient struct {
 	BaseURL     string
 	Model       string
 	Dimensions  int
@@ -70,12 +70,12 @@ func (e *embeddingError) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func NewOpenAIEmbedder(baseURL string, model string) OpenAIEmbedder {
+func NewOpenAIClient(baseURL string, model string) OpenAIClient {
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = DefaultBaseURL
 	}
 
-	return OpenAIEmbedder{
+	return OpenAIClient{
 		BaseURL:    strings.TrimRight(baseURL, "/"),
 		Model:      model,
 		MaxRetries: DefaultMaxRetries,
@@ -83,7 +83,7 @@ func NewOpenAIEmbedder(baseURL string, model string) OpenAIEmbedder {
 	}
 }
 
-func (e OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+func (e OpenAIClient) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
 	}
@@ -104,7 +104,7 @@ func (e OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32,
 	return e.embedWithRetry(ctx, endpoint, body, len(texts))
 }
 
-func (e OpenAIEmbedder) embedWithRetry(ctx context.Context, endpoint string, body []byte, count int) ([][]float32, error) {
+func (e OpenAIClient) embedWithRetry(ctx context.Context, endpoint string, body []byte, count int) ([][]float32, error) {
 	var lastErr error
 	for attempt := 0; attempt <= e.MaxRetries; attempt++ {
 		vectors, retryable, err := e.embedOnce(ctx, endpoint, body, count)
@@ -126,7 +126,7 @@ func (e OpenAIEmbedder) embedWithRetry(ctx context.Context, endpoint string, bod
 
 // embedOnce performs a single embedding request. The boolean reports whether the
 // returned error is transient and worth retrying.
-func (e OpenAIEmbedder) embedOnce(ctx context.Context, endpoint string, body []byte, count int) ([][]float32, bool, error) {
+func (e OpenAIClient) embedOnce(ctx context.Context, endpoint string, body []byte, count int) ([][]float32, bool, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, false, err
@@ -162,7 +162,7 @@ func (e OpenAIEmbedder) embedOnce(ctx context.Context, endpoint string, body []b
 	return vectors, false, nil
 }
 
-func (e OpenAIEmbedder) client() *http.Client {
+func (e OpenAIClient) client() *http.Client {
 	if e.HTTPClient != nil {
 		return e.HTTPClient
 	}
@@ -170,7 +170,7 @@ func (e OpenAIEmbedder) client() *http.Client {
 	return &http.Client{Timeout: DefaultRequestTimeout}
 }
 
-func (e OpenAIEmbedder) validateDimensions(vectors [][]float32) error {
+func (e OpenAIClient) validateDimensions(vectors [][]float32) error {
 	if e.Dimensions <= 0 {
 		return nil
 	}
@@ -184,7 +184,7 @@ func (e OpenAIEmbedder) validateDimensions(vectors [][]float32) error {
 	return nil
 }
 
-func (e OpenAIEmbedder) backoffDelay(attempt int) time.Duration {
+func (e OpenAIClient) backoffDelay(attempt int) time.Duration {
 	base := e.BackoffBase
 	if base <= 0 {
 		base = DefaultBackoffBase

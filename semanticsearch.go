@@ -33,7 +33,7 @@ import (
 // strategies. Each field is required. Every dependency is an interface, so a caller can supply
 // the built-in implementations (via the NewXxx constructors) or their own.
 type Config struct {
-	Model         strategy.Model
+	Model         strategy.EmbeddingModel
 	Embedder      strategy.Embedder
 	Storage       storage.Storage
 	VectorStorage storage.VectorStorage
@@ -43,7 +43,7 @@ type Config struct {
 // Engine is a configured index/search unit. Multiple engines with different embedders, stores,
 // and strategies can run independently and in parallel.
 type Engine struct {
-	model       strategy.Model
+	model       strategy.EmbeddingModel
 	embedder    strategy.Embedder
 	store       storage.Storage
 	vectorStore storage.VectorStorage
@@ -148,7 +148,7 @@ type SearchResult struct {
 
 // PredefinedModel selects one of the built-in embedding models by name. Each one bundles the
 // model's id, vector size, and the prompt templates it needs, so callers do not hand-write
-// templates. For a model that is not listed, implement strategy.Model yourself and inject it.
+// templates. For a model that is not listed, implement strategy.EmbeddingModel yourself and inject it.
 type PredefinedModel string
 
 // Gemma300mQAT is EmbeddingGemma (text-embedding-embeddinggemma-300m-qat, 768 dimensions).
@@ -156,7 +156,7 @@ const Gemma300mQAT PredefinedModel = "gemma-300m-qat"
 
 // NewModel builds the model knowledge (id, dimensions, prompt templates) for a predefined
 // model. It returns nil for an unknown model; NewEngine rejects a nil model.
-func NewModel(model PredefinedModel) strategy.Model {
+func NewModel(model PredefinedModel) strategy.EmbeddingModel {
 	switch model {
 	case Gemma300mQAT:
 		return embedder.GemmaModel{}
@@ -191,12 +191,12 @@ type AiEmbedderConfig struct {
 // NewAiEmbedder builds the transport client for the given standard, configured to send the
 // model's id and validate its vector size. It returns nil for an unknown standard or a nil
 // model; NewEngine rejects a nil embedder.
-func NewAiEmbedder(config AiEmbedderConfig, model strategy.Model) strategy.Embedder {
+func NewAiEmbedder(config AiEmbedderConfig, model strategy.EmbeddingModel) strategy.Embedder {
 	if config.Standard != StandardOpenAI || model == nil {
 		return nil
 	}
 
-	client := embedder.NewOpenAIEmbedder(config.BaseURL, model.Name())
+	client := embedder.NewOpenAIClient(config.BaseURL, model.Name())
 	client.Dimensions = model.Dimensions()
 	client.APIKey = config.APIKey
 	if config.Timeout > 0 {
@@ -290,14 +290,14 @@ func NewPostgresVectorStorage(ctx context.Context, dsn string, dimensions int, i
 // To register a custom strategy, construct a StrategyFactory whose Build returns it.
 type StrategyFactory struct {
 	Extensions []string
-	Build      func(model strategy.Model, embedder strategy.Embedder) (strategy.Strategy, func() error, error)
+	Build      func(model strategy.EmbeddingModel, embedder strategy.Embedder) (strategy.Strategy, func() error, error)
 }
 
 // NewMarkdownStrategy registers the Markdown strategy.
 func NewMarkdownStrategy() StrategyFactory {
 	return StrategyFactory{
 		Extensions: []string{".md", ".markdown", ".mdown"},
-		Build: func(model strategy.Model, embedder strategy.Embedder) (strategy.Strategy, func() error, error) {
+		Build: func(model strategy.EmbeddingModel, embedder strategy.Embedder) (strategy.Strategy, func() error, error) {
 			return markdown.NewMarkdownStrategy(general.NewGeneralStrategy(model, embedder)), nil, nil
 		},
 	}
@@ -308,7 +308,7 @@ func NewMarkdownStrategy() StrategyFactory {
 func NewPDFStrategy() StrategyFactory {
 	return StrategyFactory{
 		Extensions: []string{".pdf"},
-		Build: func(model strategy.Model, embedder strategy.Embedder) (strategy.Strategy, func() error, error) {
+		Build: func(model strategy.EmbeddingModel, embedder strategy.Embedder) (strategy.Strategy, func() error, error) {
 			extractor, err := pdf.NewPDFium()
 			if err != nil {
 				return nil, nil, err
@@ -323,7 +323,7 @@ func NewPDFStrategy() StrategyFactory {
 func NewCodeStrategy() StrategyFactory {
 	return StrategyFactory{
 		Extensions: []string{".go", ".js", ".ts", ".jsx", ".tsx", ".py", ".php", ".java", ".rb", ".rs", ".c", ".h", ".cpp", ".hpp", ".cs", ".sh", ".sql"},
-		Build: func(model strategy.Model, embedder strategy.Embedder) (strategy.Strategy, func() error, error) {
+		Build: func(model strategy.EmbeddingModel, embedder strategy.Embedder) (strategy.Strategy, func() error, error) {
 			return code.NewCodeStrategy(general.NewGeneralStrategy(model, embedder)), nil, nil
 		},
 	}
@@ -333,7 +333,7 @@ func NewCodeStrategy() StrategyFactory {
 func NewDocxStrategy() StrategyFactory {
 	return StrategyFactory{
 		Extensions: []string{".docx"},
-		Build: func(model strategy.Model, embedder strategy.Embedder) (strategy.Strategy, func() error, error) {
+		Build: func(model strategy.EmbeddingModel, embedder strategy.Embedder) (strategy.Strategy, func() error, error) {
 			return docx.NewDocxStrategy(general.NewGeneralStrategy(model, embedder)), nil, nil
 		},
 	}
@@ -343,7 +343,7 @@ func NewDocxStrategy() StrategyFactory {
 func NewTextStrategy() StrategyFactory {
 	return StrategyFactory{
 		Extensions: []string{".txt", ".text", ".log", ".rst", ".org", ".adoc"},
-		Build: func(model strategy.Model, embedder strategy.Embedder) (strategy.Strategy, func() error, error) {
+		Build: func(model strategy.EmbeddingModel, embedder strategy.Embedder) (strategy.Strategy, func() error, error) {
 			return general.NewGeneralStrategy(model, embedder), nil, nil
 		},
 	}
@@ -387,7 +387,7 @@ func validateNoDuplicateExtensions(factories []StrategyFactory) error {
 // buildStrategies runs each factory with the shared embedder. It returns the strategies and a
 // single release function that closes everything they opened. If a factory fails it releases
 // whatever was opened so far and returns the error, so the caller just propagates it.
-func buildStrategies(factories []StrategyFactory, model strategy.Model, embedder strategy.Embedder) ([]strategy.Strategy, func(), error) {
+func buildStrategies(factories []StrategyFactory, model strategy.EmbeddingModel, embedder strategy.Embedder) ([]strategy.Strategy, func(), error) {
 	strategies := make([]strategy.Strategy, 0, len(factories))
 	var closers []func() error
 	release := func() {

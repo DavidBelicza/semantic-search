@@ -21,11 +21,11 @@ import (
 // (paragraphs with overlap), and embeds via the injected embedder. Markdown and PDF embed it
 // for these generic per-file steps and override Claims/Parse/Chunk for their format.
 type GeneralStrategy struct {
-	model    strategy.Model
+	model    strategy.EmbeddingModel
 	embedder strategy.Embedder
 }
 
-func NewGeneralStrategy(model strategy.Model, embedder strategy.Embedder) GeneralStrategy {
+func NewGeneralStrategy(model strategy.EmbeddingModel, embedder strategy.Embedder) GeneralStrategy {
 	return GeneralStrategy{model: model, embedder: embedder}
 }
 

@@ -100,7 +100,7 @@ reference the model without coupling to a store. One SQLite file holds the data:
 
 ## Embedding
 
-Embedding is split into two injected parts: a **model** (`strategy.Model`) that owns the
+Embedding is split into two injected parts: a **model** (`strategy.EmbeddingModel`) that owns the
 model id, vector size, and prompt templates, and an **embedder** (`strategy.Embedder`) that
 is the transport client speaking the OpenAI-compatible API. Keeping them separate lets the
 same client serve any model. The default model is `EmbeddingGemma-300m-qat` (768-dim); its

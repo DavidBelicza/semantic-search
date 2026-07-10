@@ -27,12 +27,12 @@ type Embedder interface {
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
 }
 
-// Model carries the model-specific knowledge that Embedder deliberately does not: the model's
-// id and vector size, and how to phrase a document chunk and a query for it. Prompt templates
-// vary per model while the wire protocol does not, so this is kept separate from Embedder and
+// EmbeddingModel carries the model-specific knowledge: the model's id and vector size, and how
+// to phrase a document chunk and a query for it. Prompt templates vary per model while the wire
+// protocol does not, so this knowledge is kept out of the transport client (see Embedder) and
 // injected alongside it. BuildData formats a chunk for indexing; BuildQuery formats a search
 // query.
-type Model interface {
+type EmbeddingModel interface {
 	Name() string
 	Dimensions() int
 	BuildData(chunk storage.Chunk) string

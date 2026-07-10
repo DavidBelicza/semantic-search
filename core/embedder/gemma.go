@@ -17,7 +17,7 @@ const (
 
 // GemmaModel carries the model-specific knowledge for EmbeddingGemma: its id, its vector size,
 // and the prompt templates it requires. It does not talk to the server — transport is handled
-// separately by OpenAIEmbedder — so it composes with any OpenAI-compatible client.
+// separately by OpenAIClient — so it composes with any OpenAI-compatible client.
 //
 // EmbeddingGemma requires prompt templates: indexed passages use
 // "title: <title> | text: <content>" and queries use "task: search result | query: <query>".
