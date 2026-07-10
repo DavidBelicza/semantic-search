@@ -13,7 +13,6 @@ import (
 )
 
 const (
-	DefaultBaseURL        = "http://127.0.0.1:1234"
 	DefaultMaxRetries     = 3
 	DefaultRequestTimeout = 60 * time.Second
 	DefaultBackoffBase    = 200 * time.Millisecond
@@ -71,10 +70,6 @@ func (e *embeddingError) UnmarshalJSON(data []byte) error {
 }
 
 func NewOpenAIClient(baseURL string, model string) OpenAIClient {
-	if strings.TrimSpace(baseURL) == "" {
-		baseURL = DefaultBaseURL
-	}
-
 	return OpenAIClient{
 		BaseURL:    strings.TrimRight(baseURL, "/"),
 		Model:      model,
@@ -290,10 +285,6 @@ func encodeEmbeddingRequest(request openAIEmbeddingRequest) ([]byte, error) {
 }
 
 func embeddingsEndpoint(baseURL string) (string, error) {
-	if strings.TrimSpace(baseURL) == "" {
-		baseURL = DefaultBaseURL
-	}
-
 	parsed, err := url.Parse(strings.TrimRight(baseURL, "/"))
 	if err != nil {
 		return "", fmt.Errorf("parse embedding base url: %w", err)

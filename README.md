@@ -96,19 +96,15 @@ import (
 )
 
 func main() {
+	// Configure the search engine. You compose it from an embedder that turns
+	// text into vectors, a metadata store, a vector store, and the strategies
+	// that decide which file types are handled and how each one is parsed and
+	// chunked.
 	ctx := context.Background()
-
-	// Configure the search engine. You compose it from an embedder that turns text
-	// into vectors, a metadata store, a vector store, and the strategies that decide
-	// which file types are handled and how each one is parsed and chunked.
 	store, _ := semanticsearch.NewSQLiteStorage(ctx, "index.db")
 	defer store.Close()
 	vectors, _ := semanticsearch.NewSQLiteVectorStorage(ctx, "vectors.db", 768)
 	defer vectors.Close()
-
-	// The model carries the model-specific knowledge (its id, vector size, and the prompt
-	// templates it needs); the embedder is the transport client that speaks to the server.
-	// They are separate so you can point the same OpenAI-compatible client at any model.
 	model := semanticsearch.NewModel(semanticsearch.Gemma300mQAT)
 
 	engine, err := semanticsearch.NewEngine(semanticsearch.Config{
@@ -131,16 +127,16 @@ func main() {
 		panic(err)
 	}
 
-	// Index the directory. The engine maps the directory recursively, parses every
-	// supported file, splits each one into chunks, and embeds those chunks into
-	// vectors with the AI model.
+	// Index the directory. The engine maps the directory recursively, parses
+	// every supported file, splits each one into chunks, and embeds those
+	// chunks into vectors with the AI model.
 	if err := engine.Index(ctx, "./docs", semanticsearch.IndexOptions{}); err != nil {
 		panic(err)
 	}
 
-	// Search the indexed content. The query is embedded the same way, and the engine
-	// returns the chunks whose meaning is closest to it, so results are matched by
-	// meaning rather than exact keywords.
+	// Search the indexed content. The query is embedded the same way, and
+	// the engine returns the chunks whose meaning is closest to it, so
+	// results are matched by meaning rather than exact keywords.
 	results, _ := engine.Search(ctx, "how do I detect security threats in logs", 5)
 	for _, r := range results {
 		fmt.Printf("%s  (score %.4f)\n%s\n", r.Title, r.Score, r.Text)
@@ -188,48 +184,44 @@ If your vector database runs on the server side, you can reasonably scale it up.
 vectors, _ := semanticsearch.NewPostgresVectorStorage(ctx, dsn, 768, semanticsearch.PostgresHNSW)
 ```
 
-### Choosing a model
+### Choosing an embedder model
 
-A **model** is the model-specific half of embedding: its id, its vector size, and the prompt
-templates it needs. It is kept separate from the embedder (the transport client) so the same
-OpenAI-compatible client can serve any model. Pick a built-in one with `NewModel`:
+The model interface defines the model's name, dimension size, data structure format, and search query format.
+The example uses Gemma, which has 300 million parameters and 768 dimensions. It is a reasonable embedder model that can run locally.
 
 ```go
 model := semanticsearch.NewModel(semanticsearch.Gemma300mQAT)
 ```
 
-For a model that is not built in, implement the model interface yourself and inject it. It
-owns the id, dimensions, and how a chunk and a query are phrased:
+For a custom model, or any model that is not listed in this library, you can implement the `EmbeddingModel` interface and inject it. This is a basic example of implementing a new `EmbeddingModel`.
 
 ```go
 type myModel struct{}
 
 func (myModel) Name() string       { return "my-embedding-model" }
 func (myModel) Dimensions() int    { return 1024 }
-func (myModel) BuildData(chunk storage.Chunk) string { return chunk.Text }        // no template
+func (myModel) BuildData(chunk storage.Chunk) string { return chunk.Text }
 func (myModel) BuildQuery(query string) string       { return query }
 
 // semanticsearch.NewEngine(semanticsearch.Config{ Model: myModel{}, ... })
 ```
 
-### Custom embedder
+### Custom AI client
 
-The built-in `NewAiEmbedder` speaks the OpenAI-compatible protocol with an optional `APIKey`
-(sent as a Bearer token). For anything it does not cover, such as rotating OAuth tokens (e.g. production Vertex AI), request signing (e.g. AWS Bedrock), or a non-OpenAI wire format, implement the
-embedder interface yourself and inject it. It is a single method:
+The built-in `NewAiEmbedder` returns an `OpenAIClient` that speaks the OpenAI-compatible protocol with an optional `APIKey` (sent as a Bearer token). For anything it does not cover, such as rotating OAuth tokens (e.g. production Vertex AI), request signing (e.g. AWS Bedrock), or a non-OpenAI wire format, implement the `Embedder` interface yourself and inject it. It is a single method:
 
 ```go
-type myEmbedder struct {
+type myClient struct {
 	// your HTTP client, credentials, token cache, etc.
 }
 
-func (m myEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+func (c myClient) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	// Refresh your OAuth token / sign the request here, call your provider, and
 	// return one vector per input text, in the same order.
 }
 
-// Inject it like any other embedder:
-// semanticsearch.NewEngine(semanticsearch.Config{ Embedder: myEmbedder{...}, ... })
+// Inject it like any other client:
+// semanticsearch.NewEngine(semanticsearch.Config{ Embedder: myClient{}, ... })
 ```
 
 ## Documents
