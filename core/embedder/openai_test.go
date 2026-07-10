@@ -111,28 +111,6 @@ func TestOpenAIEmbedderPostsArbitraryMarkdownContentAsText(t *testing.T) {
 	}
 }
 
-func TestOpenAIEmbedderAppliesPrefixToInput(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request openAIEmbeddingRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		if len(request.Input) != 1 || request.Input[0] != "search_query: hello" {
-			t.Fatalf("prefix was not applied to input: %#v", request.Input)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[0.1,0.2]}]}`))
-	}))
-	defer server.Close()
-
-	embedder := NewOpenAIEmbedder(server.URL, "test-model")
-	embedder.Prefix = "search_query: "
-	if _, err := embedder.Embed(context.Background(), []string{"hello"}); err != nil {
-		t.Fatalf("embed with prefix: %v", err)
-	}
-}
-
 func TestOpenAIEmbedderRejectsMissingEmbedding(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

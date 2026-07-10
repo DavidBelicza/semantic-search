@@ -14,32 +14,11 @@ import (
 
 const (
 	DefaultBaseURL        = "http://127.0.0.1:1234"
-	DefaultModel          = "text-embedding-embeddinggemma-300m-qat"
-	DefaultDimensions     = 768
 	DefaultMaxRetries     = 3
 	DefaultRequestTimeout = 60 * time.Second
 	DefaultBackoffBase    = 200 * time.Millisecond
 	DefaultBackoffMax     = 5 * time.Second
-
-	// EmbeddingGemma requires prompt templates: indexed passages use
-	// "title: <title> | text: <content>" and queries use
-	// "task: search result | query: <query>". Omitting them badly degrades ranking
-	// (junk can outrank relevant chunks). Documents are formatted per-chunk by
-	// DocumentInput; queries use QueryPrefix.
-	QueryPrefix = "task: search result | query: "
 )
-
-// DocumentInput formats a chunk for indexing using EmbeddingGemma's document template.
-// The title carries the chunk's heading path (or note name); an empty title becomes
-// "none", the model's documented placeholder.
-func DocumentInput(title string, text string) string {
-	label := strings.TrimSpace(title)
-	if label == "" {
-		label = "none"
-	}
-
-	return "title: " + label + " | text: " + text
-}
 
 type OpenAIEmbedder struct {
 	BaseURL     string
@@ -51,9 +30,6 @@ type OpenAIEmbedder struct {
 	// APIKey, when set, is sent as an "Authorization: Bearer <APIKey>" header. Leave it empty
 	// for local servers (e.g. LM Studio) that need no authentication.
 	APIKey string
-	// Prefix is prepended to every input before embedding (e.g. a task prefix). The
-	// stored chunk text is unaffected; only the embedding input carries the prefix.
-	Prefix string
 }
 
 type openAIEmbeddingRequest struct {
@@ -98,9 +74,6 @@ func NewOpenAIEmbedder(baseURL string, model string) OpenAIEmbedder {
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = DefaultBaseURL
 	}
-	if strings.TrimSpace(model) == "" {
-		model = DefaultModel
-	}
 
 	return OpenAIEmbedder{
 		BaseURL:    strings.TrimRight(baseURL, "/"),
@@ -123,25 +96,12 @@ func (e OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32,
 		return nil, err
 	}
 
-	body, err := encodeEmbeddingRequest(openAIEmbeddingRequest{Model: e.Model, Input: e.applyPrefix(texts)})
+	body, err := encodeEmbeddingRequest(openAIEmbeddingRequest{Model: e.Model, Input: texts})
 	if err != nil {
 		return nil, err
 	}
 
 	return e.embedWithRetry(ctx, endpoint, body, len(texts))
-}
-
-func (e OpenAIEmbedder) applyPrefix(texts []string) []string {
-	if e.Prefix == "" {
-		return texts
-	}
-
-	prefixed := make([]string, len(texts))
-	for i, text := range texts {
-		prefixed[i] = e.Prefix + text
-	}
-
-	return prefixed
 }
 
 func (e OpenAIEmbedder) embedWithRetry(ctx context.Context, endpoint string, body []byte, count int) ([][]float32, error) {

@@ -40,6 +40,7 @@ func newTestEngine(t *testing.T, factories ...StrategyFactory) *Engine {
 	}
 
 	engine, err := NewEngine(Config{
+		Model:         NewModel(Gemma300mQAT),
 		Embedder:      fixedEmbedder{},
 		Storage:       store,
 		VectorStorage: vectors,
@@ -114,19 +115,23 @@ func TestEngineIndexAndSearch(t *testing.T) {
 
 func TestNewAiEmbedderOpenAI(t *testing.T) {
 	e := NewAiEmbedder(AiEmbedderConfig{
-		Standard:   StandardOpenAI,
-		BaseURL:    "http://127.0.0.1:1234",
-		Model:      "embeddinggemma-300m",
-		Dimensions: 768,
-	})
+		Standard: StandardOpenAI,
+		BaseURL:  "http://127.0.0.1:1234",
+	}, NewModel(Gemma300mQAT))
 	if e == nil {
 		t.Fatal("expected an embedder for the OpenAI standard")
 	}
 }
 
 func TestNewAiEmbedderUnknownStandardIsNil(t *testing.T) {
-	if NewAiEmbedder(AiEmbedderConfig{Standard: "nope"}) != nil {
+	if NewAiEmbedder(AiEmbedderConfig{Standard: "nope"}, NewModel(Gemma300mQAT)) != nil {
 		t.Fatal("expected nil for an unknown standard")
+	}
+}
+
+func TestNewModelUnknownIsNil(t *testing.T) {
+	if NewModel("nope") != nil {
+		t.Fatal("expected nil for an unknown model")
 	}
 }
 

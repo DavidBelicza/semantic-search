@@ -57,7 +57,7 @@ func headingStyles() string {
 }
 
 func newDocx() strategy.Strategy {
-	return NewDocxStrategy(general.NewGeneralStrategy(nil))
+	return NewDocxStrategy(general.NewGeneralStrategy(nil, nil))
 }
 
 func TestDocxClaimsOnlyDocx(t *testing.T) {

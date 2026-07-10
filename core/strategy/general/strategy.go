@@ -10,10 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/davidbelicza/semantic-search/core/embedder"
-	"github.com/davidbelicza/semantic-search/internal/fs"
 	"github.com/davidbelicza/semantic-search/core/storage"
 	"github.com/davidbelicza/semantic-search/core/strategy"
+	"github.com/davidbelicza/semantic-search/internal/fs"
 	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
 
@@ -22,11 +21,12 @@ import (
 // (paragraphs with overlap), and embeds via the injected embedder. Markdown and PDF embed it
 // for these generic per-file steps and override Claims/Parse/Chunk for their format.
 type GeneralStrategy struct {
+	model    strategy.Model
 	embedder strategy.Embedder
 }
 
-func NewGeneralStrategy(embedder strategy.Embedder) GeneralStrategy {
-	return GeneralStrategy{embedder: embedder}
+func NewGeneralStrategy(model strategy.Model, embedder strategy.Embedder) GeneralStrategy {
+	return GeneralStrategy{model: model, embedder: embedder}
 }
 
 // Claims reports whether the path is a plain-text file this strategy handles. It is a fixed
@@ -73,7 +73,7 @@ func (GeneralStrategy) Chunk(doc storage.Document, parsed strategy.ParsedDocumen
 func (s GeneralStrategy) Embed(ctx context.Context, chunks []storage.Chunk) ([][]float32, error) {
 	texts := make([]string, len(chunks))
 	for i, chunk := range chunks {
-		texts[i] = embedder.DocumentInput(chunk.Title, chunk.Text)
+		texts[i] = s.model.BuildData(chunk)
 	}
 
 	return s.embedder.Embed(ctx, texts)

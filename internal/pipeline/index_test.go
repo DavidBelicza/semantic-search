@@ -40,7 +40,7 @@ func TestIndexDiscoversRegistersAndFingerprints(t *testing.T) {
 		t.Fatalf("schema: %v", err)
 	}
 
-	pool := strategy.NewPool(markdown.NewMarkdownStrategy(general.NewGeneralStrategy(nil)))
+	pool := strategy.NewPool(markdown.NewMarkdownStrategy(general.NewGeneralStrategy(nil, nil)))
 	if err := pipeline.Index(context.Background(), store, pool, root, pipeline.Options{}, false); err != nil {
 		t.Fatalf("index: %v", err)
 	}

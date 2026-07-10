@@ -19,7 +19,7 @@ func (f fakePDFExtractor) ExtractRuns([]byte) ([]TextRun, error) {
 }
 
 func TestPDFStrategyClaimsOnlyPDF(t *testing.T) {
-	s := NewPDFStrategy(general.NewGeneralStrategy(nil), fakePDFExtractor{})
+	s := NewPDFStrategy(general.NewGeneralStrategy(nil, nil), fakePDFExtractor{})
 
 	if !s.Claims("report.PDF") {
 		t.Fatal("expected report.PDF to be claimed (case-insensitive)")
@@ -30,7 +30,7 @@ func TestPDFStrategyClaimsOnlyPDF(t *testing.T) {
 }
 
 func TestPDFStrategyParseBuildsSectionsFromRuns(t *testing.T) {
-	s := NewPDFStrategy(general.NewGeneralStrategy(nil), fakePDFExtractor{runs: []TextRun{
+	s := NewPDFStrategy(general.NewGeneralStrategy(nil, nil), fakePDFExtractor{runs: []TextRun{
 		{Text: "Findings", FontSize: 20, X: 10, Y: 700, Page: 0},
 		{Text: "The patient is stable.", FontSize: 10, X: 10, Y: 680, Page: 0},
 	}})
@@ -52,7 +52,7 @@ func TestPDFStrategyParseBuildsSectionsFromRuns(t *testing.T) {
 
 func TestPDFStrategyParsePropagatesExtractorError(t *testing.T) {
 	wantErr := errors.New("boom")
-	s := NewPDFStrategy(general.NewGeneralStrategy(nil), fakePDFExtractor{err: wantErr})
+	s := NewPDFStrategy(general.NewGeneralStrategy(nil, nil), fakePDFExtractor{err: wantErr})
 
 	if _, err := s.Parse([]byte("%PDF-1.7")); !errors.Is(err, wantErr) {
 		t.Fatalf("expected extractor error to propagate, got %v", err)
@@ -60,7 +60,7 @@ func TestPDFStrategyParsePropagatesExtractorError(t *testing.T) {
 }
 
 func TestPDFStrategyImageOnlyYieldsNoChunks(t *testing.T) {
-	s := NewPDFStrategy(general.NewGeneralStrategy(nil), fakePDFExtractor{runs: nil})
+	s := NewPDFStrategy(general.NewGeneralStrategy(nil, nil), fakePDFExtractor{runs: nil})
 
 	parsed, err := s.Parse([]byte("%PDF-1.7"))
 	if err != nil {

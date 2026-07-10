@@ -77,6 +77,7 @@ func TestEndToEndPostgres(t *testing.T) {
 func newEngine(t *testing.T, store storage.Storage, vectors storage.VectorStorage, dimensions int) *semanticsearch.Engine {
 	t.Helper()
 	engine, err := semanticsearch.NewEngine(semanticsearch.Config{
+		Model:         plainModel{dim: dimensions},      // production: semanticsearch.NewModel(...)
 		Embedder:      hashingEmbedder{dim: dimensions}, // production: semanticsearch.NewAiEmbedder(...)
 		Storage:       store,
 		VectorStorage: vectors,
@@ -140,6 +141,21 @@ func resetPostgres(t *testing.T, dsn string) {
 		t.Fatalf("reset postgres: %v", err)
 	}
 }
+
+// plainModel is a neutral model for the end-to-end test: no prompt templates, so the hashing
+// embedder sees the raw chunk and query text. In production you would inject
+// semanticsearch.NewModel(...) instead.
+type plainModel struct{ dim int }
+
+func (m plainModel) Name() string    { return "hashing" }
+func (m plainModel) Dimensions() int { return m.dim }
+func (plainModel) BuildData(chunk storage.Chunk) string {
+	if chunk.Title == "" {
+		return chunk.Text
+	}
+	return chunk.Title + " " + chunk.Text
+}
+func (plainModel) BuildQuery(query string) string { return query }
 
 // hashingEmbedder is a deterministic, in-process embedder for the end-to-end test: it hashes
 // each token into a fixed-size vector, so texts that share words end up close together. It

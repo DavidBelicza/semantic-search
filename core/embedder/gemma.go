@@ -1,27 +1,46 @@
 package embedder
 
-import "context"
+import (
+	"strings"
 
-// EmbeddingGemma300MQATEmbedder embeds document chunks using the EmbeddingGemma model
-// (text-embedding-embeddinggemma-300m-qat, 768 dimensions) served over the LM Studio
-// OpenAI-compatible API. It is named after the official model id for precision; it is
-// not the separate gemma-4-e2b text-generation model.
+	"github.com/davidbelicza/semantic-search/core/storage"
+)
+
+const (
+	// GemmaModelName is the official model id for EmbeddingGemma (768 dimensions), served over
+	// an OpenAI-compatible API. It is named for precision; it is not the separate gemma-4-e2b
+	// text-generation model.
+	GemmaModelName = "text-embedding-embeddinggemma-300m-qat"
+	// GemmaModelDimensions is EmbeddingGemma's output vector size.
+	GemmaModelDimensions = 768
+)
+
+// GemmaModel carries the model-specific knowledge for EmbeddingGemma: its id, its vector size,
+// and the prompt templates it requires. It does not talk to the server — transport is handled
+// separately by OpenAIEmbedder — so it composes with any OpenAI-compatible client.
 //
-// It is a document embedder: callers format each chunk with DocumentInput before
-// embedding. Query embedding uses QueryPrefix separately (see the search path).
-type EmbeddingGemma300MQATEmbedder struct {
-	client OpenAIEmbedder
+// EmbeddingGemma requires prompt templates: indexed passages use
+// "title: <title> | text: <content>" and queries use "task: search result | query: <query>".
+// Omitting them badly degrades ranking (junk can outrank relevant chunks).
+type GemmaModel struct{}
+
+func (GemmaModel) Name() string { return GemmaModelName }
+
+func (GemmaModel) Dimensions() int { return GemmaModelDimensions }
+
+// BuildData formats a chunk for indexing with EmbeddingGemma's document template. The title
+// carries the chunk's heading path (or note name); an empty title becomes "none", the model's
+// documented placeholder.
+func (GemmaModel) BuildData(chunk storage.Chunk) string {
+	label := strings.TrimSpace(chunk.Title)
+	if label == "" {
+		label = "none"
+	}
+
+	return "title: " + label + " | text: " + chunk.Text
 }
 
-// NewEmbeddingGemma300MQATEmbedder builds the preconfigured document embedder pointed at
-// the given base URL (empty falls back to DefaultBaseURL).
-func NewEmbeddingGemma300MQATEmbedder(baseURL string) *EmbeddingGemma300MQATEmbedder {
-	client := NewOpenAIEmbedder(baseURL, DefaultModel)
-	client.Dimensions = DefaultDimensions
-
-	return &EmbeddingGemma300MQATEmbedder{client: client}
-}
-
-func (e *EmbeddingGemma300MQATEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
-	return e.client.Embed(ctx, texts)
+// BuildQuery formats a search query with EmbeddingGemma's query template.
+func (GemmaModel) BuildQuery(query string) string {
+	return "task: search result | query: " + query
 }

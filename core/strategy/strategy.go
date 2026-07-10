@@ -19,10 +19,24 @@ type FileRef struct {
 	Info fs.FileInfo
 }
 
-// Embedder turns texts into vectors. It is injected into a strategy, because embedding is a
-// per-file operation that belongs to the strategy.
+// Embedder turns texts into vectors by talking to an embedding server. It is the transport
+// client: it owns the wire protocol, auth, and retries, but nothing model-specific. It is
+// injected into a strategy, because embedding is a per-file operation that belongs to the
+// strategy.
 type Embedder interface {
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
+}
+
+// Model carries the model-specific knowledge that Embedder deliberately does not: the model's
+// id and vector size, and how to phrase a document chunk and a query for it. Prompt templates
+// vary per model while the wire protocol does not, so this is kept separate from Embedder and
+// injected alongside it. BuildData formats a chunk for indexing; BuildQuery formats a search
+// query.
+type Model interface {
+	Name() string
+	Dimensions() int
+	BuildData(chunk storage.Chunk) string
+	BuildQuery(query string) string
 }
 
 // Section is one parsed part of a document: a heading path plus the body text under it. Path

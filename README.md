@@ -106,13 +106,17 @@ func main() {
 	vectors, _ := semanticsearch.NewSQLiteVectorStorage(ctx, "vectors.db", 768)
 	defer vectors.Close()
 
+	// The model carries the model-specific knowledge (its id, vector size, and the prompt
+	// templates it needs); the embedder is the transport client that speaks to the server.
+	// They are separate so you can point the same OpenAI-compatible client at any model.
+	model := semanticsearch.NewModel(semanticsearch.Gemma300mQAT)
+
 	engine, err := semanticsearch.NewEngine(semanticsearch.Config{
+		Model: model,
 		Embedder: semanticsearch.NewAiEmbedder(semanticsearch.AiEmbedderConfig{
-			Standard:   semanticsearch.StandardOpenAI,
-			BaseURL:    "http://127.0.0.1:1234",
-			Model:      "text-embedding-embeddinggemma-300m-qat",
-			Dimensions: 768,
-		}),
+			Standard: semanticsearch.StandardOpenAI,
+			BaseURL:  "http://127.0.0.1:1234",
+		}, model),
 		Storage:       store,
 		VectorStorage: vectors,
 		Strategies: []semanticsearch.StrategyFactory{
@@ -182,6 +186,30 @@ If your vector database runs on the server side, you can reasonably scale it up.
 
 ```go
 vectors, _ := semanticsearch.NewPostgresVectorStorage(ctx, dsn, 768, semanticsearch.PostgresHNSW)
+```
+
+### Choosing a model
+
+A **model** is the model-specific half of embedding: its id, its vector size, and the prompt
+templates it needs. It is kept separate from the embedder (the transport client) so the same
+OpenAI-compatible client can serve any model. Pick a built-in one with `NewModel`:
+
+```go
+model := semanticsearch.NewModel(semanticsearch.Gemma300mQAT)
+```
+
+For a model that is not built in, implement the model interface yourself and inject it. It
+owns the id, dimensions, and how a chunk and a query are phrased:
+
+```go
+type myModel struct{}
+
+func (myModel) Name() string       { return "my-embedding-model" }
+func (myModel) Dimensions() int    { return 1024 }
+func (myModel) BuildData(chunk storage.Chunk) string { return chunk.Text }        // no template
+func (myModel) BuildQuery(query string) string       { return query }
+
+// semanticsearch.NewEngine(semanticsearch.Config{ Model: myModel{}, ... })
 ```
 
 ### Custom embedder
