@@ -30,36 +30,79 @@ Status: **done** / **todo** (partial = base exists, needs wiring).
   dependency and variable quality, not a format add.
 - **Audio / video** — transcription; out of scope for a file indexer.
 
-# Library API — refactor roadmap
+# Embedding models — roadmap
 
-Turn the project into a library-first API. The packages a consumer needs to name or extend
-move **whole** from `internal/` to a public `core/` tree — no aliases, and no package is split
-(a package either stays entirely in `internal/` or moves entirely to `core/`). The interfaces
-then live in their natural domain packages (`core/strategy`, `core/storage`, `core/embedder`),
-imported directly. A root `semanticsearch` facade provides the convenience layer (`Engine` +
-constructors); its strategy constructors are factories, so `NewEngine` injects the embedder
-into each strategy under the hood — `Embed` and `Claims` stay on the Strategy interface.
-Phase 1 unlocks injection; Phase 2 adds implementations behind the same interfaces.
+Dedicated `EmbeddingModel` implementations for popular models, alongside `GemmaModel`. Each is
+a small type (like `GemmaModel`) plus a `PredefinedModel` constant and a `NewModel` case — no
+transport changes: they all speak the OpenAI `/v1/embeddings` protocol through the existing
+`OpenAIClient`. The value they add over `GeneralModel` is the model's document/query prompt
+templates (`BuildData` / `BuildQuery`), which measurably improve retrieval separation.
 
-Package moves (each moved as a whole unit):
+Only prefix/instruction-based models are listed here (their document vs. query distinction is
+carried in the input text, which the model layer owns). Models that select the task via an API
+field (Gemini `taskType`, Cohere `input_type`) need a new client/`Standard`, not just a model,
+and are out of scope for this section.
 
-- **→ `core/`:** `embedder`, `storage`, `strategy` (with all subpackages)
-- **stay in `internal/`:** `fs`, `pipeline`, `textproc` — plumbing users never name; the public
-  `core/*` packages may still import them (a public package importing an internal one in the
-  same module is legal).
+Conventions:
 
-| Step | Change | Phase | Status |
-|---|---|---|---|
-| Move to core | Move whole packages `internal/{embedder,storage,strategy}` → `core/{embedder,storage,strategy}`; update import paths; `internal/{fs,pipeline,textproc}` stay | 1 | done |
-| Store interfaces | Define `Storage` (metadata/chunks) and `VectorStorage` interfaces in `core/storage` from the current sqlite/sqlitevec methods; pipeline depends on the interfaces, not concrete stores | 1 | done |
-| Embedder injection | Facade strategy constructors are factories; `NewEngine` builds each strategy with the injected embedder (`general.NewGeneralStrategy(embedder)`), keeping `Embed` and `Claims` unchanged | 1 | done |
-| Embedder API | `NewAiEmbedder(AiEmbedderConfig{Standard, BaseURL, Model, Dimensions})` with typed `StandardOpenAI` const | 1 | done |
-| Dup validation | Facade constructors carry each built-in's extensions (custom strategies supply their own); `NewEngine` errors on duplicate extensions | 1 | done |
-| Store constructors | Per-type: `NewSQLiteStorage(ctx, path)`, `NewSQLiteVectorStorage(ctx, path, dimensions)` (returning `core/storage` interfaces) | 1 | done |
-| Strategy constructors | Factories: `NewMarkdownStrategy()`, `NewPDFStrategy()`, `NewCodeStrategy()`, `NewDocxStrategy()`, `NewTextStrategy()` | 1 | done |
-| Facade | Root `semanticsearch` package absorbs `pkg/`: `Index`/`Search` become `Engine` methods, `build.go` wiring splits into `NewEngine` + the constructors, and `IndexOptions`/`SearchResult` move here. Consumers import `core/*` directly for interfaces (no aliases). *(Engine added; old package-level `Index`/`Search`/`build.go` removed in the next step.)* | 1 | done |
-| Remove CLI | After `pkg/` logic has migrated to the facade, delete `pkg/`, `cmd/`, `main.go`; drop cobra / pflag / mousetrap from `go.mod` | 1 | done |
-| E2E tests | Black-box example test: full composition with an in-process hashing embedder (no server), indexing text/markdown/code/docx fixtures and asserting retrieval — runs in CI | 1 | done |
-| Postgres store | `core/storage/postgres` implementing `Storage` via pure-Go pgx (CGO-free path when sqlite isn't imported); `NewPostgresStorage` facade constructor | 2 | done |
-| pgvector | `core/storage/pgvector` implementing `VectorStorage`; `NewPostgresVectorStorage`; docker-compose + CI service + gated integration/e2e tests | 2 | done |
-| More embedders | Additional `Standard` values behind `NewAiEmbedder` (e.g. Cohere) | 2 | todo |
+- **Matryoshka truncation is out of scope** — each model uses its fixed native vector size.
+- **Encode the vector size in the constant name** (e.g. `Nomic768`) so the dimension is visible
+  at the call site; the constant maps to the model's native dimension. (`Gemma300mQAT` keeps its
+  parameter-based name.)
+- Only models with a GGUF that LM Studio can install are included; all five below are verified
+  available on Hugging Face.
+- **Verify each with a live margin probe** against LM Studio before marking done — a wrong
+  prompt string does not error, it silently degrades ranking.
+
+| Model | Constant | Dim | Document prompt | Query prompt | GGUF source | Status |
+|---|---|---|---|---|---|---|
+| Nomic Embed Text v1.5 | `Nomic768` | 768 | `search_document: ` | `search_query: ` | `nomic-ai/nomic-embed-text-v1.5-GGUF` | todo |
+| Multilingual E5 large | `E5Large1024` | 1024 | `passage: ` | `query: ` | `phate334/multilingual-e5-large-gguf` | todo |
+| BGE large en v1.5 | `BGELarge1024` | 1024 | (none) | `Represent this sentence for searching relevant passages: ` | `CompendiumLabs/bge-large-en-v1.5-gguf` | todo |
+| Qwen3 Embedding 0.6B | `Qwen3Embedding0_6B1024` | 1024 | (none) | `Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: ` | `Qwen/Qwen3-Embedding-0.6B-GGUF` | todo |
+| mxbai embed large v1 | `MxbaiLarge1024` | 1024 | (none) | `Represent this sentence for searching relevant passages: ` | `ChristianAzinn/mxbai-embed-large-v1-gguf` | todo |
+
+## Interface improvement — caller-controlled query task
+
+Let the caller pick the query's task/intent — retrieval (search) vs. semantic similarity,
+question answering, classification, clustering, etc. — instead of always assuming retrieval.
+This is fully doable today over the current OpenAI client with prefix-based models: it just
+swaps the task name in `BuildQuery`. Gemma already documents the whole family in the same shape
+(`task: search result | query:`, `task: question answering | query:`, `task: classification |
+query:`, …); Qwen3's instruction and E5/Nomic prefixes carry the same intent. (A future
+param-based client, e.g. Gemini, would map the same task kind to an API field like `taskType` —
+not required for this feature.)
+
+Thread a transport-agnostic `taskType` from `Search` into `BuildQuery` (document embedding stays
+as-is), so the same index can be queried with different intents. Only the retrieval prompt is
+verified so far; validate each additional task name with a live probe.
+
+`taskType` rules:
+
+- **Free-text string.** Convenience constants are provided for the common tasks, but any string
+  may be passed. No validation by default — it is the caller's responsibility to pass a value
+  the chosen model understands (and one compatible with how the index was built).
+- **Always optional, with a default.** Omitting it embeds the query with the model's default
+  (retrieval) prompt, so existing callers are unaffected.
+- One value per call; no model needs two task types at once (role — document vs. query — is a
+  separate axis, handled by `BuildData` vs. `BuildQuery`).
+
+# Wrap-up review — before merge
+
+Cross-cutting cleanup once the embedder/model work above is settled:
+
+- **Inline documentation** — review all doc comments across the changed packages for accuracy
+  against the final code.
+- **Code and tests** — review for dead code and for stale variable/identifier names left over
+  from the embedder/model refactor and renames (e.g. embedder → client, `Model` →
+  `EmbeddingModel`).
+
+# README — update chapter
+
+Add a dedicated section to the README showcasing the new capabilities:
+
+- **What semantic search is** — a small table of example search queries and their returned
+  results, to show meaning-based matching (query wording differs from the result wording).
+- **Switching models** — an example of moving from Gemma to another model (e.g. Nomic) with
+  `NewModel` / `NewGeneralModel`.
+- **Setting the task** — an example of passing a `taskType` on a search query.
