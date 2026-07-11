@@ -27,7 +27,12 @@ func (E5LargeModel) BuildData(chunk storage.Chunk) string {
 	return "passage: " + chunk.Text
 }
 
-// BuildQuery formats a search query with E5's query prefix.
-func (E5LargeModel) BuildQuery(query string) string {
-	return "query: " + query
+// BuildQuery formats a search query with E5's query prefix. E5 embeds queries in a single mode,
+// so a non-empty task type is rejected rather than silently ignored.
+func (E5LargeModel) BuildQuery(query, taskType string) (string, error) {
+	if taskType != "" {
+		return "", unsupportedTaskType(E5LargeModelName)
+	}
+
+	return "query: " + query, nil
 }

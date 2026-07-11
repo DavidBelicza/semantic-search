@@ -155,7 +155,7 @@ func (plainModel) BuildData(chunk storage.Chunk) string {
 	}
 	return chunk.Title + " " + chunk.Text
 }
-func (plainModel) BuildQuery(query string) string { return query }
+func (plainModel) BuildQuery(query, taskType string) (string, error) { return query, nil }
 
 // hashingEmbedder is a deterministic, in-process embedder for the end-to-end test: it hashes
 // each token into a fixed-size vector, so texts that share words end up close together. It

@@ -28,8 +28,17 @@ func TestE5LargeModelBuildData(t *testing.T) {
 }
 
 func TestE5LargeModelBuildQuery(t *testing.T) {
-	got := E5LargeModel{}.BuildQuery("how do I pay")
+	got, err := E5LargeModel{}.BuildQuery("how do I pay", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if got != "query: how do I pay" {
 		t.Fatalf("build query mismatch: %q", got)
+	}
+}
+
+func TestE5LargeModelBuildQueryRejectsTaskType(t *testing.T) {
+	if _, err := (E5LargeModel{}).BuildQuery("how do I pay", "classification"); err == nil {
+		t.Fatal("expected an error for an unsupported task type")
 	}
 }

@@ -215,9 +215,33 @@ type myModel struct{}
 func (myModel) Name() string       { return "my-embedding-model" }
 func (myModel) Dimensions() int    { return 1024 }
 func (myModel) BuildData(chunk storage.Chunk) string { return chunk.Text }
-func (myModel) BuildQuery(query string) string       { return query }
+func (myModel) BuildQuery(query, taskType string) (string, error) { return query, nil }
 
 // semanticsearch.NewEngine(semanticsearch.Config{ Model: myModel{}, ... })
+```
+
+### Optimizing search with tasks
+
+Models can search differently depending on the task, and the available tasks depend on the model. The task is an optional last argument to `Search`; leave it out to use the model's default retrieval task. For example, Gemma searches differently based on its task:
+
+```go
+semanticsearch.NewModel(semanticsearch.Gemma300mQAT)
+...
+engine.Search(ctx, "I want a spicy tea", 5)
+```
+
+```go
+semanticsearch.NewModel(semanticsearch.Gemma300mQAT)
+...
+engine.Search(ctx, "I want a spicy tea", 5, semanticsearch.TaskGemma.Classification)
+```
+
+Gemma has 7 tasks. Other models instead take free text as the task. For example:
+
+```go
+semanticsearch.NewModel(semanticsearch.Qwen30_6B1024)
+...
+engine.Search(ctx, "I want a spicy tea", 5, "Find the most exclusive product for this query")
 ```
 
 ### Custom AI client

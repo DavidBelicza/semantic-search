@@ -29,7 +29,12 @@ func (MxbaiLargeModel) BuildData(chunk storage.Chunk) string {
 	return chunk.Text
 }
 
-// BuildQuery prepends mxbai's retrieval instruction to the query.
-func (MxbaiLargeModel) BuildQuery(query string) string {
-	return mxbaiQueryInstruction + query
+// BuildQuery prepends mxbai's retrieval instruction to the query. mxbai embeds queries in a
+// single mode, so a non-empty task type is rejected rather than silently ignored.
+func (MxbaiLargeModel) BuildQuery(query, taskType string) (string, error) {
+	if taskType != "" {
+		return "", unsupportedTaskType(MxbaiLargeModelName)
+	}
+
+	return mxbaiQueryInstruction + query, nil
 }

@@ -31,12 +31,13 @@ type AiClient interface {
 // to phrase a document chunk and a query for it. Prompt templates vary per model while the wire
 // protocol does not, so this knowledge is kept out of the transport client (see AiClient) and
 // injected alongside it. BuildData formats a chunk for indexing; BuildQuery formats a search
-// query.
+// query, optionally for a given task type (empty means the model's default retrieval task). A
+// model that only embeds for retrieval returns an error when handed a non-empty task type.
 type EmbeddingModel interface {
 	Name() string
 	Dimensions() int
 	BuildData(chunk storage.Chunk) string
-	BuildQuery(query string) string
+	BuildQuery(query, taskType string) (string, error)
 }
 
 // Section is one parsed part of a document: a heading path plus the body text under it. Path

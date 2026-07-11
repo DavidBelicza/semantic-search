@@ -29,7 +29,12 @@ func (BGELargeModel) BuildData(chunk storage.Chunk) string {
 	return chunk.Text
 }
 
-// BuildQuery prepends BGE's retrieval instruction to the query.
-func (BGELargeModel) BuildQuery(query string) string {
-	return bgeQueryInstruction + query
+// BuildQuery prepends BGE's retrieval instruction to the query. BGE embeds queries in a single
+// mode, so a non-empty task type is rejected rather than silently ignored.
+func (BGELargeModel) BuildQuery(query, taskType string) (string, error) {
+	if taskType != "" {
+		return "", unsupportedTaskType(BGELargeModelName)
+	}
+
+	return bgeQueryInstruction + query, nil
 }

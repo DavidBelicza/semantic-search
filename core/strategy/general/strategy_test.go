@@ -31,7 +31,7 @@ func (fakeModel) Dimensions() int { return 1 }
 func (fakeModel) BuildData(chunk storage.Chunk) string {
 	return "title: " + chunk.Title + " | text: " + chunk.Text
 }
-func (fakeModel) BuildQuery(query string) string { return query }
+func (fakeModel) BuildQuery(query, taskType string) (string, error) { return query, nil }
 
 func TestGeneralStrategyClaimsPlainText(t *testing.T) {
 	s := NewGeneralStrategy(nil, nil)

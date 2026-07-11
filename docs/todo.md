@@ -62,7 +62,14 @@ Conventions:
 | Qwen3 Embedding 0.6B | `Qwen30_6B1024` | 1024 | (none) | `Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: ` | `Qwen/Qwen3-Embedding-0.6B-GGUF` | done |
 | mxbai embed large v1 | `MxbaiLarge1024` | 1024 | (none) | `Represent this sentence for searching relevant passages: ` | `ChristianAzinn/mxbai-embed-large-v1-gguf` | done |
 
-## Interface improvement — caller-controlled query task
+## Interface improvement — caller-controlled query task — done
+
+Done: `BuildQuery(query, taskType string) (string, error)`; `Search` takes an optional variadic
+`taskType` (first value only). Gemma/Nomic slot the task keyword; Qwen3 slots a task-description
+sentence; E5/BGE/mxbai/General are retrieval-only and return an error for a non-empty task type
+(instead of silently ignoring it). Convenience task names live per model in the model package
+(`GemmaTasks`, `NomicTasks`) and are re-exported on the facade as `TaskGemma` / `TaskNomic`;
+Qwen3 takes a free-text instruction sentence, so it has no set. Original notes below.
 
 Let the caller pick the query's task/intent — retrieval (search) vs. semantic similarity,
 question answering, classification, clustering, etc. — instead of always assuming retrieval.
@@ -80,8 +87,11 @@ verified so far; validate each additional task name with a live probe.
 `taskType` rules:
 
 - **Free-text string.** Convenience constants are provided for the common tasks, but any string
-  may be passed. No validation by default — it is the caller's responsibility to pass a value
-  the chosen model understands (and one compatible with how the index was built).
+  may be passed. No *content* validation — for a model that accepts task types, it is the
+  caller's responsibility to pass a value the model understands (and one compatible with how the
+  index was built).
+- **Rejected when unsupported.** A retrieval-only model returns an error for a non-empty task
+  type rather than silently ignoring it (silent degradation is the failure mode this avoids).
 - **Always optional, with a default.** Omitting it embeds the query with the model's default
   (retrieval) prompt, so existing callers are unaffected.
 - One value per call; no model needs two task types at once (role — document vs. query — is a

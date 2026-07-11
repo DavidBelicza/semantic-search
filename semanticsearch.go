@@ -92,8 +92,11 @@ func (e *Engine) Index(ctx context.Context, rootPath string, options IndexOption
 	return pipeline.Process(ctx, e.store, e.vectorStore, pool, options.FailFast)
 }
 
-// Search embeds the query and returns the nearest chunk matches in similarity order.
-func (e *Engine) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
+// Search embeds the query and returns the nearest chunk matches in similarity order. An optional
+// task type tells the model how to phrase the query (see the Task* constants); omit it to use the
+// model's default retrieval task. Only the first value is used; passing a task type to a model
+// that does not support one returns an error.
+func (e *Engine) Search(ctx context.Context, query string, limit int, taskType ...string) ([]SearchResult, error) {
 	if limit <= 0 {
 		return nil, errors.New("limit must be greater than zero")
 	}
@@ -101,7 +104,17 @@ func (e *Engine) Search(ctx context.Context, query string, limit int) ([]SearchR
 		return nil, errors.New("search query is required")
 	}
 
-	vectors, err := e.embedder.Embed(ctx, []string{e.model.BuildQuery(query)})
+	task := ""
+	if len(taskType) > 0 {
+		task = taskType[0]
+	}
+
+	phrased, err := e.model.BuildQuery(query, task)
+	if err != nil {
+		return nil, err
+	}
+
+	vectors, err := e.embedder.Embed(ctx, []string{phrased})
 	if err != nil {
 		return nil, err
 	}
@@ -146,6 +159,13 @@ type SearchResult struct {
 }
 
 // --- Model ---
+
+// Model-specific query task types for Search. Any string is accepted; these are just the tasks
+// each model documents.
+var (
+	TaskGemma = model.GemmaTasks
+	TaskNomic = model.NomicTasks
+)
 
 // PredefinedModel selects one of the built-in embedding models by name. Each one bundles the
 // model's id, vector size, and the prompt templates it needs, so callers do not hand-write

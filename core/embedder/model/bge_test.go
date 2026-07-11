@@ -24,8 +24,17 @@ func TestBGELargeModelBuildData(t *testing.T) {
 }
 
 func TestBGELargeModelBuildQuery(t *testing.T) {
-	got := BGELargeModel{}.BuildQuery("how do I pay")
+	got, err := BGELargeModel{}.BuildQuery("how do I pay", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if got != "Represent this sentence for searching relevant passages: how do I pay" {
 		t.Fatalf("build query mismatch: %q", got)
+	}
+}
+
+func TestBGELargeModelBuildQueryRejectsTaskType(t *testing.T) {
+	if _, err := (BGELargeModel{}).BuildQuery("how do I pay", "classification"); err == nil {
+		t.Fatal("expected an error for an unsupported task type")
 	}
 }

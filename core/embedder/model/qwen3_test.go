@@ -24,8 +24,22 @@ func TestQwen3SmallModelBuildData(t *testing.T) {
 }
 
 func TestQwen3SmallModelBuildQuery(t *testing.T) {
-	got := Qwen3SmallModel{}.BuildQuery("how do I pay")
-	want := "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: how do I pay"
+	got, err := Qwen3SmallModel{}.BuildQuery("how do I pay", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "Instruct: Search for this\nQuery: how do I pay"
+	if got != want {
+		t.Fatalf("build query mismatch: %q", got)
+	}
+}
+
+func TestQwen3SmallModelBuildQueryWithTaskType(t *testing.T) {
+	got, err := Qwen3SmallModel{}.BuildQuery("how do I pay", "Retrieve code that matches the query")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "Instruct: Retrieve code that matches the query\nQuery: how do I pay"
 	if got != want {
 		t.Fatalf("build query mismatch: %q", got)
 	}

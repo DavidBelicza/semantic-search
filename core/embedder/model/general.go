@@ -25,7 +25,12 @@ func (GeneralModel) BuildData(chunk storage.Chunk) string {
 	return chunk.Text
 }
 
-// BuildQuery embeds the query unchanged.
-func (GeneralModel) BuildQuery(query string) string {
-	return query
+// BuildQuery embeds the query unchanged. A template-free model has no task template, so a
+// non-empty task type is rejected rather than silently ignored.
+func (m GeneralModel) BuildQuery(query, taskType string) (string, error) {
+	if taskType != "" {
+		return "", unsupportedTaskType(m.name)
+	}
+
+	return query, nil
 }

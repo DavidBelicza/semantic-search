@@ -8,8 +8,9 @@ const (
 	Qwen3SmallModelName = "text-embedding-qwen3-embedding-0.6b"
 	// Qwen3SmallModelDimensions is Qwen3 Embedding 0.6B's output vector size.
 	Qwen3SmallModelDimensions = 1024
-	// qwen3QueryInstruction is Qwen3's documented retrieval instruction, prepended to queries only.
-	qwen3QueryInstruction = "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
+	// qwen3DefaultInstruction is the retrieval instruction used when the caller gives no task
+	// type. Qwen3 expects a full instruction sentence, not a keyword.
+	qwen3DefaultInstruction = "Search for this"
 )
 
 // Qwen3SmallModel carries the model-specific knowledge for Qwen3 Embedding 0.6B: its id, its
@@ -29,7 +30,14 @@ func (Qwen3SmallModel) BuildData(chunk storage.Chunk) string {
 	return chunk.Text
 }
 
-// BuildQuery prepends Qwen3's retrieval instruction to the query.
-func (Qwen3SmallModel) BuildQuery(query string) string {
-	return qwen3QueryInstruction + query
+// BuildQuery wraps the query in Qwen3's "Instruct: … Query: …" template. The task type is the
+// instruction sentence (Qwen3 expects a full description, not a keyword); an empty task type uses
+// Qwen3's default retrieval instruction.
+func (Qwen3SmallModel) BuildQuery(query, taskType string) (string, error) {
+	instruction := taskType
+	if instruction == "" {
+		instruction = qwen3DefaultInstruction
+	}
+
+	return "Instruct: " + instruction + "\nQuery: " + query, nil
 }

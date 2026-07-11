@@ -28,8 +28,21 @@ func TestNomicModelBuildData(t *testing.T) {
 }
 
 func TestNomicModelBuildQuery(t *testing.T) {
-	got := NomicModel{}.BuildQuery("how do I pay")
+	got, err := NomicModel{}.BuildQuery("how do I pay", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if got != "search_query: how do I pay" {
+		t.Fatalf("build query mismatch: %q", got)
+	}
+}
+
+func TestNomicModelBuildQueryWithTaskType(t *testing.T) {
+	got, err := NomicModel{}.BuildQuery("how do I pay", "classification")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "classification: how do I pay" {
 		t.Fatalf("build query mismatch: %q", got)
 	}
 }

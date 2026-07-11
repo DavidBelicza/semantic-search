@@ -24,8 +24,17 @@ func TestMxbaiLargeModelBuildData(t *testing.T) {
 }
 
 func TestMxbaiLargeModelBuildQuery(t *testing.T) {
-	got := MxbaiLargeModel{}.BuildQuery("how do I pay")
+	got, err := MxbaiLargeModel{}.BuildQuery("how do I pay", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if got != "Represent this sentence for searching relevant passages: how do I pay" {
 		t.Fatalf("build query mismatch: %q", got)
+	}
+}
+
+func TestMxbaiLargeModelBuildQueryRejectsTaskType(t *testing.T) {
+	if _, err := (MxbaiLargeModel{}).BuildQuery("how do I pay", "classification"); err == nil {
+		t.Fatal("expected an error for an unsupported task type")
 	}
 }

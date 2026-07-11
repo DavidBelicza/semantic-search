@@ -15,6 +15,20 @@ const (
 	GemmaModelDimensions = 768
 )
 
+// GemmaTasks are the query task types EmbeddingGemma documents. Retrieval is the default.
+// Read-only.
+var GemmaTasks = struct {
+	Retrieval, QuestionAnswering, FactChecking, Classification, Clustering, SentenceSimilarity, CodeRetrieval string
+}{
+	Retrieval:          "search result",
+	QuestionAnswering:  "question answering",
+	FactChecking:       "fact checking",
+	Classification:     "classification",
+	Clustering:         "clustering",
+	SentenceSimilarity: "sentence similarity",
+	CodeRetrieval:      "code retrieval",
+}
+
 // GemmaModel carries the model-specific knowledge for EmbeddingGemma: its id, its vector size,
 // and the prompt templates it requires. It does not talk to the server — transport is handled
 // separately by OpenAIClient — so it composes with any OpenAI-compatible client.
@@ -40,7 +54,14 @@ func (GemmaModel) BuildData(chunk storage.Chunk) string {
 	return "title: " + label + " | text: " + chunk.Text
 }
 
-// BuildQuery formats a search query with EmbeddingGemma's query template.
-func (GemmaModel) BuildQuery(query string) string {
-	return "task: search result | query: " + query
+// BuildQuery formats a search query with EmbeddingGemma's query template. The task type fills
+// the "task:" field (e.g. "classification", "question answering"); an empty task type uses
+// "search result", Gemma's default retrieval task.
+func (GemmaModel) BuildQuery(query, taskType string) (string, error) {
+	task := taskType
+	if task == "" {
+		task = GemmaTasks.Retrieval
+	}
+
+	return "task: " + task + " | query: " + query, nil
 }
