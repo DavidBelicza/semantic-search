@@ -56,11 +56,11 @@ Conventions:
 
 | Model | Constant | Dim | Document prompt | Query prompt | GGUF source | Status |
 |---|---|---|---|---|---|---|
-| Nomic Embed Text v1.5 | `Nomic768` | 768 | `search_document: ` | `search_query: ` | `nomic-ai/nomic-embed-text-v1.5-GGUF` | todo |
-| Multilingual E5 large | `E5Large1024` | 1024 | `passage: ` | `query: ` | `phate334/multilingual-e5-large-gguf` | todo |
-| BGE large en v1.5 | `BGELarge1024` | 1024 | (none) | `Represent this sentence for searching relevant passages: ` | `CompendiumLabs/bge-large-en-v1.5-gguf` | todo |
-| Qwen3 Embedding 0.6B | `Qwen3Embedding0_6B1024` | 1024 | (none) | `Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: ` | `Qwen/Qwen3-Embedding-0.6B-GGUF` | todo |
-| mxbai embed large v1 | `MxbaiLarge1024` | 1024 | (none) | `Represent this sentence for searching relevant passages: ` | `ChristianAzinn/mxbai-embed-large-v1-gguf` | todo |
+| Nomic Embed Text v1.5 | `Nomic768` | 768 | `search_document: ` | `search_query: ` | `nomic-ai/nomic-embed-text-v1.5-GGUF` | done |
+| Multilingual E5 large | `E5Large1024` | 1024 | `passage: ` | `query: ` | `phate334/multilingual-e5-large-gguf` | done |
+| BGE large en v1.5 | `BGELarge1024` | 1024 | (none) | `Represent this sentence for searching relevant passages: ` | `CompendiumLabs/bge-large-en-v1.5-gguf` | done |
+| Qwen3 Embedding 0.6B | `Qwen30_6B1024` | 1024 | (none) | `Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: ` | `Qwen/Qwen3-Embedding-0.6B-GGUF` | done |
+| mxbai embed large v1 | `MxbaiLarge1024` | 1024 | (none) | `Represent this sentence for searching relevant passages: ` | `ChristianAzinn/mxbai-embed-large-v1-gguf` | done |
 
 ## Interface improvement — caller-controlled query task
 

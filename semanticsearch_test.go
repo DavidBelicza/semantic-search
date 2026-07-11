@@ -23,7 +23,7 @@ func (fixedEmbedder) Embed(_ context.Context, texts []string) ([][]float32, erro
 }
 
 // compile-time check that the fake satisfies the embedder contract.
-var _ strategy.Embedder = fixedEmbedder{}
+var _ strategy.AiClient = fixedEmbedder{}
 
 func newTestEngine(t *testing.T, factories ...StrategyFactory) *Engine {
 	t.Helper()

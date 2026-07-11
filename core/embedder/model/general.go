@@ -1,4 +1,4 @@
-package embedder
+package model
 
 import "github.com/davidbelicza/semantic-search/core/storage"
 

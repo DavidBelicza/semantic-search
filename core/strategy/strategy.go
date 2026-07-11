@@ -19,17 +19,17 @@ type FileRef struct {
 	Info fs.FileInfo
 }
 
-// Embedder turns texts into vectors by talking to an embedding server. It is the transport
+// AiClient turns texts into vectors by talking to an embedding server. It is the transport
 // client: it owns the wire protocol, auth, and retries, but nothing model-specific. It is
 // injected into a strategy, because embedding is a per-file operation that belongs to the
 // strategy.
-type Embedder interface {
+type AiClient interface {
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
 }
 
 // EmbeddingModel carries the model-specific knowledge: the model's id and vector size, and how
 // to phrase a document chunk and a query for it. Prompt templates vary per model while the wire
-// protocol does not, so this knowledge is kept out of the transport client (see Embedder) and
+// protocol does not, so this knowledge is kept out of the transport client (see AiClient) and
 // injected alongside it. BuildData formats a chunk for indexing; BuildQuery formats a search
 // query.
 type EmbeddingModel interface {

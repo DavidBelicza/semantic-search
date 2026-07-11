@@ -22,10 +22,10 @@ import (
 // for these generic per-file steps and override Claims/Parse/Chunk for their format.
 type GeneralStrategy struct {
 	model    strategy.EmbeddingModel
-	embedder strategy.Embedder
+	embedder strategy.AiClient
 }
 
-func NewGeneralStrategy(model strategy.EmbeddingModel, embedder strategy.Embedder) GeneralStrategy {
+func NewGeneralStrategy(model strategy.EmbeddingModel, embedder strategy.AiClient) GeneralStrategy {
 	return GeneralStrategy{model: model, embedder: embedder}
 }
 

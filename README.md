@@ -192,6 +192,15 @@ The model interface defines the model's name, dimension size, data structure for
 model := semanticsearch.NewModel(semanticsearch.Gemma300mQAT)
 ```
 
+There are other pre-defined models available in this library:
+
+- `semanticsearch.NewModel(semanticsearch.Gemma300mQAT)` loads **text-embedding-embeddinggemma-300m-qat** (768 dim)
+- `semanticsearch.NewModel(semanticsearch.Nomic768)` loads **text-embedding-nomic-embed-text-v1.5** (768 dim)
+- `semanticsearch.NewModel(semanticsearch.E5Large1024)` loads **text-embedding-multilingual-e5-large** (1024 dim)
+- `semanticsearch.NewModel(semanticsearch.BGELarge1024)` loads **text-embedding-bge-large-en-v1.5** (1024 dim)
+- `semanticsearch.NewModel(semanticsearch.Qwen30_6B1024)` loads **text-embedding-qwen3-embedding-0.6b** (1024 dim)
+- `semanticsearch.NewModel(semanticsearch.MxbaiLarge1024)` loads **text-embedding-mxbai-embed-large-v1** (1024 dim)
+
 For any other model that needs no prompt templates, use `NewGeneralModel` with the model id and vector size. Switching models or dimensions is just a different argument.
 
 ```go
@@ -213,7 +222,7 @@ func (myModel) BuildQuery(query string) string       { return query }
 
 ### Custom AI client
 
-The built-in `NewAiEmbedder` returns an `OpenAIClient` that speaks the OpenAI-compatible protocol with an optional `APIKey` (sent as a Bearer token). For anything it does not cover, such as rotating OAuth tokens (e.g. production Vertex AI), request signing (e.g. AWS Bedrock), or a non-OpenAI wire format, implement the `Embedder` interface yourself and inject it. It is a single method:
+The built-in `NewAiEmbedder` returns an `OpenAIClient` that speaks the OpenAI-compatible protocol with an optional `APIKey` (sent as a Bearer token). For anything it does not cover, such as rotating OAuth tokens (e.g. production Vertex AI), request signing (e.g. AWS Bedrock), or a non-OpenAI wire format, implement the `AiClient` interface yourself and inject it. It is a single method:
 
 ```go
 type myClient struct {

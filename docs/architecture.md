@@ -25,8 +25,9 @@ core/storage         resource entities (Document, Chunk, …); no database code
 internal/textproc    generic, dependency-free text utilities (split, window, tokens,
                      hash, normalize, part packing, heading-path stack)
 internal/fs          stable file identity (device + inode)
-core/embedder        the embedding transport client (OpenAI-compatible) plus the
-                     model definitions (id, dimensions, prompt templates; e.g. Gemma)
+core/embedder
+  client             the embedding transport client (OpenAI-compatible)
+  model              the model definitions (id, dimensions, prompt templates; e.g. Gemma)
 ```
 
 Rule of thumb: `internal/*` provides the parts, `pkg` assembles them, `cmd` exposes them,
@@ -101,7 +102,7 @@ reference the model without coupling to a store. One SQLite file holds the data:
 ## Embedding
 
 Embedding is split into two injected parts: a **model** (`strategy.EmbeddingModel`) that owns the
-model id, vector size, and prompt templates, and an **embedder** (`strategy.Embedder`) that
+model id, vector size, and prompt templates, and an **AI client** (`strategy.AiClient`) that
 is the transport client speaking the OpenAI-compatible API. Keeping them separate lets the
 same client serve any model. The default model is `EmbeddingGemma-300m-qat` (768-dim); its
 `BuildData`/`BuildQuery` apply the templates documents and queries need — omitting them badly

@@ -1,4 +1,4 @@
-package embedder
+package client
 
 import (
 	"bytes"
