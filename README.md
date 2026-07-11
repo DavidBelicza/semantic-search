@@ -15,6 +15,39 @@
 <br>It <strong>recursively indexes</strong> PDF, Markdown, code, and many other file types in a directory, then <strong>chunks</strong> them and stores them in a <strong>vector database</strong> using an <strong>embedding AI model</strong>.
 <br>It enables <strong>meaning-based search</strong> across your documents and works for both <strong>client-side</strong> and <strong>server-side</strong> solutions. Written in <strong>Go</strong>, it is <strong>portable</strong> and compiles easily to any platform, OS, client, or server.</p>
 
+## Contents
+
+- [What semantic search is](#what-semantic-search-is)
+- [Use cases](#use-cases)
+- [Supported formats](#supported-formats)
+- [How it works](#how-it-works)
+- [Architecture](#architecture)
+- [Requirements](#requirements)
+- [Install, build, test, lint](#install-build-test-lint)
+- [Usage](#usage)
+  - [Full example](#full-example)
+  - [In-memory SQLite (single process)](#in-memory-sqlite-single-process)
+  - [Server-side setup with PostgreSQL and pgvector](#server-side-setup-with-postgresql-and-pgvector)
+  - [Scaling up with HNSW](#scaling-up-with-hnsw)
+  - [Choosing an embedder model](#choosing-an-embedder-model)
+  - [Optimizing search with tasks](#optimizing-search-with-tasks)
+  - [Custom AI client](#custom-ai-client)
+- [Documents](#documents)
+- [License](#license)
+
+## What semantic search is
+
+Semantic search matches on meaning, not on shared words. A query and a result can rank as a
+strong match even when they have no words in common, because the search compares what they mean.
+
+| Search query | Search result |
+|---|---|
+| *a gift for someone who loves cooking* | The chef's guide to essential kitchen knives |
+| *how to feel less tired during the day* | Tips for building a better sleep routine |
+| *my plant's leaves are turning yellow* | Common causes of overwatering in houseplants |
+| *something fun to do with kids on a rainy day* | Indoor board games for the whole family |
+| *ways to stay warm in winter* | A guide to insulated jackets and wool layers |
+
 ## Use cases
 
 Semantic Search works both as an embedded engine inside client apps (using the SQLite store,
@@ -45,9 +78,49 @@ on disk or in memory) and as a server-side knowledge base (using PostgreSQL and 
 4. **Embed**: turn chunks into vectors via the embedding server.
 5. **Search**: embed the query and rank chunks by vector distance using exact k-nearest-neighbor (kNN) search, comparing against every chunk for precise results.
 
+## Architecture
+
+The **Engine** is the single entry point. It runs two flows, indexing files and searching.
+Both use the same building blocks. **Strategies** turn files into text chunks. An **embedding
+model** and an **AI client** turn text into vectors. Two stores keep the document metadata and
+the vectors.
+
+```mermaid
+flowchart TD
+    App[Your application] --> Engine
+
+    subgraph Engine [Semantic Search Engine Facade]
+        Index[Index flow]
+        Search[Search flow]
+    end
+
+    Index --> Strategies[Strategies<br/>Markdown · PDF · Code · Text · DOCX]
+    Search --> Model
+    Strategies --> Model[Embedding model<br/>prompt templates]
+    Model --> Client[AI client<br/>OpenAI-compatible transport]
+    Client --> Server[(Embedding server<br/>LM Studio · Ollama · remote)]
+
+    Index --> Meta[(Metadata store<br/>SQLite · PostgreSQL)]
+    Index --> Vectors[(Vector store<br/>sqlite-vec · pgvector)]
+    Search --> Vectors
+    Search --> Meta
+
+    classDef blue fill:#E6F7FC,stroke:#10C2EB,stroke-width:2px,color:#0A5A72;
+    classDef accent fill:#FFF3DC,stroke:#F5A623,stroke-width:2px,color:#8A5410;
+
+    class App,Index,Search,Strategies blue;
+    class Model,Client,Server,Meta,Vectors accent;
+```
+
+- **Strategies** claim files by type and split them into chunks; the AI client sends each chunk
+  to the embedding server and gets back a vector.
+- **Indexing** stores the document metadata and the vectors in their two stores.
+- **Searching** embeds the query the same way, finds the nearest vectors, and resolves them back
+  to their documents through the metadata store.
+
 ## Requirements
 
-- **Every use case** needs an **OpenAI-compatible embedding server**: on your own machine (LM Studio, Ollama, or llama.cpp), or on a remote host (Google AI Studio or any other server that speaks the standard protocol).
+- **Every use case** needs an **OpenAI-compatible embedding server** (it does not mean actual OpenAI models): on your own machine (LM Studio, Ollama, or llama.cpp), or on a remote host (Google AI Studio or any other server that speaks the standard protocol).
 - **For client-side apps** (desktop, mobile, CLI), you also need a **C compiler**,
   because cgo builds `mattn/go-sqlite3` and the `sqlite-vec` bindings from source:
   - **macOS**: `xcode-select --install` (Clang)
