@@ -109,33 +109,7 @@ func (e *Engine) Search(ctx context.Context, query string, limit int, taskType .
 		task = taskType[0]
 	}
 
-	phrased, err := e.model.BuildQuery(query, task)
-	if err != nil {
-		return nil, err
-	}
-
-	vectors, err := e.embedder.Embed(ctx, []string{phrased})
-	if err != nil {
-		return nil, err
-	}
-	if len(vectors) != 1 {
-		return nil, fmt.Errorf("expected one query embedding, got %d", len(vectors))
-	}
-
-	hits, err := e.vectorStore.Search(ctx, vectors[0], limit)
-	if err != nil {
-		return nil, err
-	}
-	if len(hits) == 0 {
-		return nil, nil
-	}
-
-	metadata, err := e.store.ChunkMetadataByIDs(ctx, hitChunkIDs(hits))
-	if err != nil {
-		return nil, err
-	}
-
-	return buildSearchResults(hits, metadata), nil
+	return pipeline.Search(ctx, e.store, e.vectorStore, e.model, e.embedder, query, task, limit)
 }
 
 // IndexOptions configures an index run.
@@ -149,14 +123,9 @@ type IndexOptions struct {
 }
 
 // SearchResult is one chunk match: the document it belongs to, the chunk id, its title
-// and text, and the score (vector distance from the query — lower is closer).
-type SearchResult struct {
-	DocumentID int64
-	ChunkID    int64
-	Title      string
-	Text       string
-	Score      float64
-}
+// and text, and the score (vector distance from the query — lower is closer). It is defined
+// by the search pipeline and aliased here as part of the public API.
+type SearchResult = pipeline.SearchResult
 
 // --- Model ---
 
@@ -470,37 +439,4 @@ func buildStrategies(factories []StrategyFactory, model strategy.EmbeddingModel,
 	}
 
 	return strategies, release, nil
-}
-
-func hitChunkIDs(hits []storage.VectorHit) []int64 {
-	ids := make([]int64, len(hits))
-	for i, hit := range hits {
-		ids[i] = hit.ChunkID
-	}
-
-	return ids
-}
-
-func buildSearchResults(hits []storage.VectorHit, metadata []storage.ChunkMetadata) []SearchResult {
-	byID := make(map[int64]storage.ChunkMetadata, len(metadata))
-	for _, item := range metadata {
-		byID[item.ChunkID] = item
-	}
-
-	results := make([]SearchResult, 0, len(hits))
-	for _, hit := range hits {
-		item, ok := byID[hit.ChunkID]
-		if !ok {
-			continue
-		}
-		results = append(results, SearchResult{
-			DocumentID: item.DocumentID,
-			ChunkID:    item.ChunkID,
-			Title:      item.Title,
-			Text:       item.Text,
-			Score:      hit.Distance,
-		})
-	}
-
-	return results
 }
