@@ -10,14 +10,14 @@ import (
 )
 
 func newCode() strategy.Strategy {
-	return NewCodeStrategy(general.NewGeneralStrategy(nil))
+	return NewCodeStrategy(general.NewGeneralStrategy(nil, nil))
 }
 
 // sectionsOf runs the strategy's language split for a given path, returning the structured
 // sections so tests can assert boundaries and nesting paths.
 func sectionsOf(t *testing.T, path, source string) []strategy.Section {
 	t.Helper()
-	s := NewCodeStrategy(general.NewGeneralStrategy(nil)).(codeStrategy)
+	s := NewCodeStrategy(general.NewGeneralStrategy(nil, nil)).(codeStrategy)
 	return s.splitSource(path, source)
 }
 

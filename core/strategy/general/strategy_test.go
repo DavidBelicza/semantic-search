@@ -24,8 +24,17 @@ func (f *fakeEmbedder) Embed(_ context.Context, texts []string) ([][]float32, er
 	return vectors, nil
 }
 
+type fakeModel struct{}
+
+func (fakeModel) Name() string    { return "fake" }
+func (fakeModel) Dimensions() int { return 1 }
+func (fakeModel) BuildData(chunk storage.Chunk) string {
+	return "title: " + chunk.Title + " | text: " + chunk.Text
+}
+func (fakeModel) BuildQuery(query, taskType string) (string, error) { return query, nil }
+
 func TestGeneralStrategyClaimsPlainText(t *testing.T) {
-	s := NewGeneralStrategy(nil)
+	s := NewGeneralStrategy(nil, nil)
 
 	for _, path := range []string{"/tmp/note.txt", "/tmp/a.text", "/tmp/run.log", "/tmp/doc.rst", "/tmp/notes.org", "/tmp/page.adoc", "/tmp/UPPER.TXT"} {
 		if !s.Claims(path) {
@@ -50,7 +59,7 @@ func TestGeneralStrategyCreateMetadata(t *testing.T) {
 		t.Fatalf("stat: %v", err)
 	}
 
-	meta, err := NewGeneralStrategy(nil).CreateMetadata(strategy.FileRef{Path: path, Info: info})
+	meta, err := NewGeneralStrategy(nil, nil).CreateMetadata(strategy.FileRef{Path: path, Info: info})
 	if err != nil {
 		t.Fatalf("create metadata: %v", err)
 	}
@@ -63,14 +72,14 @@ func TestGeneralStrategyCreateMetadata(t *testing.T) {
 }
 
 func TestGeneralStrategyFingerprintHashesContent(t *testing.T) {
-	got := NewGeneralStrategy(nil).Fingerprint([]byte("hello"))
+	got := NewGeneralStrategy(nil, nil).Fingerprint([]byte("hello"))
 	if got != "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" {
 		t.Fatalf("fingerprint mismatch: %q", got)
 	}
 }
 
 func TestGeneralStrategyParseReturnsWholeText(t *testing.T) {
-	got, err := NewGeneralStrategy(nil).Parse([]byte("plain text"))
+	got, err := NewGeneralStrategy(nil, nil).Parse([]byte("plain text"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -80,7 +89,7 @@ func TestGeneralStrategyParseReturnsWholeText(t *testing.T) {
 }
 
 func TestGeneralStrategyChunkProducesMultipleChunks(t *testing.T) {
-	g := NewGeneralStrategy(nil)
+	g := NewGeneralStrategy(nil, nil)
 	parsed, err := g.Parse([]byte(strings.Repeat("x", 4000)))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -96,7 +105,7 @@ func TestGeneralStrategyChunkProducesMultipleChunks(t *testing.T) {
 
 func TestGeneralStrategyEmbedFormatsAndDelegates(t *testing.T) {
 	fake := &fakeEmbedder{}
-	vectors, err := NewGeneralStrategy(fake).Embed(context.Background(), []storage.Chunk{{Title: "Heading", Text: "body"}})
+	vectors, err := NewGeneralStrategy(fakeModel{}, fake).Embed(context.Background(), []storage.Chunk{{Title: "Heading", Text: "body"}})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
 	}

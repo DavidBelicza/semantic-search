@@ -10,7 +10,7 @@ import (
 )
 
 func newMarkdown() strategy.Strategy {
-	return NewMarkdownStrategy(general.NewGeneralStrategy(nil))
+	return NewMarkdownStrategy(general.NewGeneralStrategy(nil, nil))
 }
 
 func TestMarkdownStrategyClaimsMarkdownOnly(t *testing.T) {
@@ -61,7 +61,7 @@ func TestMarkdownStrategyChunkIsDeterministic(t *testing.T) {
 }
 
 func TestMarkdownStrategyChunkSplitsOversizedSection(t *testing.T) {
-	s := markdownStrategy{GeneralStrategy: general.NewGeneralStrategy(nil), maxTokens: 12, overlapTokens: 0, averageTokenLength: 1}
+	s := markdownStrategy{GeneralStrategy: general.NewGeneralStrategy(nil, nil), maxTokens: 12, overlapTokens: 0, averageTokenLength: 1}
 	parsed, err := s.Parse([]byte("## S\n" + strings.Repeat("word ", 40)))
 	if err != nil {
 		t.Fatalf("parse: %v", err)

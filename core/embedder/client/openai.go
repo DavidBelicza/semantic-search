@@ -1,4 +1,4 @@
-package embedder
+package client
 
 import (
 	"bytes"
@@ -13,35 +13,13 @@ import (
 )
 
 const (
-	DefaultBaseURL        = "http://127.0.0.1:1234"
-	DefaultModel          = "text-embedding-embeddinggemma-300m-qat"
-	DefaultDimensions     = 768
 	DefaultMaxRetries     = 3
 	DefaultRequestTimeout = 60 * time.Second
 	DefaultBackoffBase    = 200 * time.Millisecond
 	DefaultBackoffMax     = 5 * time.Second
-
-	// EmbeddingGemma requires prompt templates: indexed passages use
-	// "title: <title> | text: <content>" and queries use
-	// "task: search result | query: <query>". Omitting them badly degrades ranking
-	// (junk can outrank relevant chunks). Documents are formatted per-chunk by
-	// DocumentInput; queries use QueryPrefix.
-	QueryPrefix = "task: search result | query: "
 )
 
-// DocumentInput formats a chunk for indexing using EmbeddingGemma's document template.
-// The title carries the chunk's heading path (or note name); an empty title becomes
-// "none", the model's documented placeholder.
-func DocumentInput(title string, text string) string {
-	label := strings.TrimSpace(title)
-	if label == "" {
-		label = "none"
-	}
-
-	return "title: " + label + " | text: " + text
-}
-
-type OpenAIEmbedder struct {
+type OpenAIClient struct {
 	BaseURL     string
 	Model       string
 	Dimensions  int
@@ -51,9 +29,6 @@ type OpenAIEmbedder struct {
 	// APIKey, when set, is sent as an "Authorization: Bearer <APIKey>" header. Leave it empty
 	// for local servers (e.g. LM Studio) that need no authentication.
 	APIKey string
-	// Prefix is prepended to every input before embedding (e.g. a task prefix). The
-	// stored chunk text is unaffected; only the embedding input carries the prefix.
-	Prefix string
 }
 
 type openAIEmbeddingRequest struct {
@@ -94,15 +69,8 @@ func (e *embeddingError) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func NewOpenAIEmbedder(baseURL string, model string) OpenAIEmbedder {
-	if strings.TrimSpace(baseURL) == "" {
-		baseURL = DefaultBaseURL
-	}
-	if strings.TrimSpace(model) == "" {
-		model = DefaultModel
-	}
-
-	return OpenAIEmbedder{
+func NewOpenAIClient(baseURL string, model string) OpenAIClient {
+	return OpenAIClient{
 		BaseURL:    strings.TrimRight(baseURL, "/"),
 		Model:      model,
 		MaxRetries: DefaultMaxRetries,
@@ -110,7 +78,7 @@ func NewOpenAIEmbedder(baseURL string, model string) OpenAIEmbedder {
 	}
 }
 
-func (e OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+func (e OpenAIClient) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
 	}
@@ -123,7 +91,7 @@ func (e OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32,
 		return nil, err
 	}
 
-	body, err := encodeEmbeddingRequest(openAIEmbeddingRequest{Model: e.Model, Input: e.applyPrefix(texts)})
+	body, err := encodeEmbeddingRequest(openAIEmbeddingRequest{Model: e.Model, Input: texts})
 	if err != nil {
 		return nil, err
 	}
@@ -131,20 +99,7 @@ func (e OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32,
 	return e.embedWithRetry(ctx, endpoint, body, len(texts))
 }
 
-func (e OpenAIEmbedder) applyPrefix(texts []string) []string {
-	if e.Prefix == "" {
-		return texts
-	}
-
-	prefixed := make([]string, len(texts))
-	for i, text := range texts {
-		prefixed[i] = e.Prefix + text
-	}
-
-	return prefixed
-}
-
-func (e OpenAIEmbedder) embedWithRetry(ctx context.Context, endpoint string, body []byte, count int) ([][]float32, error) {
+func (e OpenAIClient) embedWithRetry(ctx context.Context, endpoint string, body []byte, count int) ([][]float32, error) {
 	var lastErr error
 	for attempt := 0; attempt <= e.MaxRetries; attempt++ {
 		vectors, retryable, err := e.embedOnce(ctx, endpoint, body, count)
@@ -166,7 +121,7 @@ func (e OpenAIEmbedder) embedWithRetry(ctx context.Context, endpoint string, bod
 
 // embedOnce performs a single embedding request. The boolean reports whether the
 // returned error is transient and worth retrying.
-func (e OpenAIEmbedder) embedOnce(ctx context.Context, endpoint string, body []byte, count int) ([][]float32, bool, error) {
+func (e OpenAIClient) embedOnce(ctx context.Context, endpoint string, body []byte, count int) ([][]float32, bool, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, false, err
@@ -202,7 +157,7 @@ func (e OpenAIEmbedder) embedOnce(ctx context.Context, endpoint string, body []b
 	return vectors, false, nil
 }
 
-func (e OpenAIEmbedder) client() *http.Client {
+func (e OpenAIClient) client() *http.Client {
 	if e.HTTPClient != nil {
 		return e.HTTPClient
 	}
@@ -210,7 +165,7 @@ func (e OpenAIEmbedder) client() *http.Client {
 	return &http.Client{Timeout: DefaultRequestTimeout}
 }
 
-func (e OpenAIEmbedder) validateDimensions(vectors [][]float32) error {
+func (e OpenAIClient) validateDimensions(vectors [][]float32) error {
 	if e.Dimensions <= 0 {
 		return nil
 	}
@@ -224,7 +179,7 @@ func (e OpenAIEmbedder) validateDimensions(vectors [][]float32) error {
 	return nil
 }
 
-func (e OpenAIEmbedder) backoffDelay(attempt int) time.Duration {
+func (e OpenAIClient) backoffDelay(attempt int) time.Duration {
 	base := e.BackoffBase
 	if base <= 0 {
 		base = DefaultBackoffBase
@@ -330,10 +285,6 @@ func encodeEmbeddingRequest(request openAIEmbeddingRequest) ([]byte, error) {
 }
 
 func embeddingsEndpoint(baseURL string) (string, error) {
-	if strings.TrimSpace(baseURL) == "" {
-		baseURL = DefaultBaseURL
-	}
-
 	parsed, err := url.Parse(strings.TrimRight(baseURL, "/"))
 	if err != nil {
 		return "", fmt.Errorf("parse embedding base url: %w", err)

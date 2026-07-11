@@ -1,4 +1,4 @@
-package embedder
+package client
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestOpenAIEmbedderPostsWithoutBearerToken(t *testing.T) {
+func TestOpenAIClientPostsWithoutBearerToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/embeddings" {
 			t.Fatalf("path mismatch: want /v1/embeddings, got %q", r.URL.Path)
@@ -42,7 +42,7 @@ func TestOpenAIEmbedderPostsWithoutBearerToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	embedder := NewOpenAIEmbedder(server.URL, "test-model")
+	embedder := NewOpenAIClient(server.URL, "test-model")
 	vectors, err := embedder.Embed(context.Background(), []string{"first", "second"})
 	if err != nil {
 		t.Fatalf("embed: %v", err)
@@ -56,7 +56,7 @@ func TestOpenAIEmbedderPostsWithoutBearerToken(t *testing.T) {
 	}
 }
 
-func TestOpenAIEmbedderSendsBearerToken(t *testing.T) {
+func TestOpenAIClientSendsBearerToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
 			t.Fatalf("authorization header mismatch: want %q, got %q", "Bearer test-key", got)
@@ -68,14 +68,14 @@ func TestOpenAIEmbedderSendsBearerToken(t *testing.T) {
 	}))
 	defer server.Close()
 
-	embedder := NewOpenAIEmbedder(server.URL, "test-model")
+	embedder := NewOpenAIClient(server.URL, "test-model")
 	embedder.APIKey = "test-key"
 	if _, err := embedder.Embed(context.Background(), []string{"hello"}); err != nil {
 		t.Fatalf("embed: %v", err)
 	}
 }
 
-func TestOpenAIEmbedderPostsArbitraryMarkdownContentAsText(t *testing.T) {
+func TestOpenAIClientPostsArbitraryMarkdownContentAsText(t *testing.T) {
 	input := strings.Join([]string{
 		"```json",
 		`{"title":"Art of Seduction","items":[1,true,null],"quote":"\"hello\""}`,
@@ -105,48 +105,26 @@ func TestOpenAIEmbedderPostsArbitraryMarkdownContentAsText(t *testing.T) {
 	}))
 	defer server.Close()
 
-	embedder := NewOpenAIEmbedder(server.URL, "test-model")
+	embedder := NewOpenAIClient(server.URL, "test-model")
 	if _, err := embedder.Embed(context.Background(), []string{input}); err != nil {
 		t.Fatalf("embed arbitrary markdown content: %v", err)
 	}
 }
 
-func TestOpenAIEmbedderAppliesPrefixToInput(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request openAIEmbeddingRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		if len(request.Input) != 1 || request.Input[0] != "search_query: hello" {
-			t.Fatalf("prefix was not applied to input: %#v", request.Input)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[0.1,0.2]}]}`))
-	}))
-	defer server.Close()
-
-	embedder := NewOpenAIEmbedder(server.URL, "test-model")
-	embedder.Prefix = "search_query: "
-	if _, err := embedder.Embed(context.Background(), []string{"hello"}); err != nil {
-		t.Fatalf("embed with prefix: %v", err)
-	}
-}
-
-func TestOpenAIEmbedderRejectsMissingEmbedding(t *testing.T) {
+func TestOpenAIClientRejectsMissingEmbedding(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[0.1]}]}`))
 	}))
 	defer server.Close()
 
-	embedder := NewOpenAIEmbedder(server.URL, "test-model")
+	embedder := NewOpenAIClient(server.URL, "test-model")
 	if _, err := embedder.Embed(context.Background(), []string{"first", "second"}); err == nil {
 		t.Fatal("expected missing embedding error")
 	}
 }
 
-func TestOpenAIEmbedderReportsStringErrorResponse(t *testing.T) {
+func TestOpenAIClientReportsStringErrorResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -154,7 +132,7 @@ func TestOpenAIEmbedderReportsStringErrorResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	embedder := NewOpenAIEmbedder(server.URL, "test-model")
+	embedder := NewOpenAIClient(server.URL, "test-model")
 	_, err := embedder.Embed(context.Background(), []string{"first"})
 	if err == nil {
 		t.Fatal("expected embedding error")
@@ -164,7 +142,7 @@ func TestOpenAIEmbedderReportsStringErrorResponse(t *testing.T) {
 	}
 }
 
-func TestOpenAIEmbedderReportsObjectErrorResponse(t *testing.T) {
+func TestOpenAIClientReportsObjectErrorResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
@@ -172,7 +150,7 @@ func TestOpenAIEmbedderReportsObjectErrorResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	embedder := NewOpenAIEmbedder(server.URL, "test-model")
+	embedder := NewOpenAIClient(server.URL, "test-model")
 	_, err := embedder.Embed(context.Background(), []string{"first"})
 	if err == nil {
 		t.Fatal("expected embedding error")
@@ -225,14 +203,14 @@ func TestEncodeEmbeddingRequestRoundTripsAndKeepsRawHTML(t *testing.T) {
 	}
 }
 
-func TestOpenAIEmbedderRejectsDimensionMismatch(t *testing.T) {
+func TestOpenAIClientRejectsDimensionMismatch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":[{"index":0,"embedding":[0.1,0.2,0.3]}]}`))
 	}))
 	defer server.Close()
 
-	embedder := NewOpenAIEmbedder(server.URL, "test-model")
+	embedder := NewOpenAIClient(server.URL, "test-model")
 	embedder.Dimensions = 4
 	_, err := embedder.Embed(context.Background(), []string{"first"})
 	if err == nil {
@@ -243,7 +221,7 @@ func TestOpenAIEmbedderRejectsDimensionMismatch(t *testing.T) {
 	}
 }
 
-func TestOpenAIEmbedderRetriesTransientStatus(t *testing.T) {
+func TestOpenAIClientRetriesTransientStatus(t *testing.T) {
 	var calls int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if atomic.AddInt32(&calls, 1) < 3 {
@@ -257,7 +235,7 @@ func TestOpenAIEmbedderRetriesTransientStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	embedder := NewOpenAIEmbedder(server.URL, "test-model")
+	embedder := NewOpenAIClient(server.URL, "test-model")
 	embedder.BackoffBase = time.Millisecond
 	vectors, err := embedder.Embed(context.Background(), []string{"first"})
 	if err != nil {
@@ -271,7 +249,7 @@ func TestOpenAIEmbedderRetriesTransientStatus(t *testing.T) {
 	}
 }
 
-func TestOpenAIEmbedderDoesNotRetryClientError(t *testing.T) {
+func TestOpenAIClientDoesNotRetryClientError(t *testing.T) {
 	var calls int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&calls, 1)
@@ -280,7 +258,7 @@ func TestOpenAIEmbedderDoesNotRetryClientError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	embedder := NewOpenAIEmbedder(server.URL, "test-model")
+	embedder := NewOpenAIClient(server.URL, "test-model")
 	embedder.BackoffBase = time.Millisecond
 	_, err := embedder.Embed(context.Background(), []string{"first"})
 	if err == nil {
@@ -291,7 +269,7 @@ func TestOpenAIEmbedderDoesNotRetryClientError(t *testing.T) {
 	}
 }
 
-func TestOpenAIEmbedderRetriesExhaustedReturnsError(t *testing.T) {
+func TestOpenAIClientRetriesExhaustedReturnsError(t *testing.T) {
 	var calls int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&calls, 1)
@@ -300,7 +278,7 @@ func TestOpenAIEmbedderRetriesExhaustedReturnsError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	embedder := NewOpenAIEmbedder(server.URL, "test-model")
+	embedder := NewOpenAIClient(server.URL, "test-model")
 	embedder.MaxRetries = 2
 	embedder.BackoffBase = time.Millisecond
 	_, err := embedder.Embed(context.Background(), []string{"first"})

@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/davidbelicza/semantic-search/core/storage"
 	"github.com/davidbelicza/semantic-search/core/strategy"
 )
 
@@ -23,7 +22,7 @@ func (fixedEmbedder) Embed(_ context.Context, texts []string) ([][]float32, erro
 }
 
 // compile-time check that the fake satisfies the embedder contract.
-var _ strategy.Embedder = fixedEmbedder{}
+var _ strategy.AiClient = fixedEmbedder{}
 
 func newTestEngine(t *testing.T, factories ...StrategyFactory) *Engine {
 	t.Helper()
@@ -40,6 +39,7 @@ func newTestEngine(t *testing.T, factories ...StrategyFactory) *Engine {
 	}
 
 	engine, err := NewEngine(Config{
+		Model:         NewModel(Gemma300mQAT),
 		Embedder:      fixedEmbedder{},
 		Storage:       store,
 		VectorStorage: vectors,
@@ -114,19 +114,34 @@ func TestEngineIndexAndSearch(t *testing.T) {
 
 func TestNewAiEmbedderOpenAI(t *testing.T) {
 	e := NewAiEmbedder(AiEmbedderConfig{
-		Standard:   StandardOpenAI,
-		BaseURL:    "http://127.0.0.1:1234",
-		Model:      "embeddinggemma-300m",
-		Dimensions: 768,
-	})
+		Standard: StandardOpenAI,
+		BaseURL:  "http://127.0.0.1:1234",
+	}, NewModel(Gemma300mQAT))
 	if e == nil {
 		t.Fatal("expected an embedder for the OpenAI standard")
 	}
 }
 
 func TestNewAiEmbedderUnknownStandardIsNil(t *testing.T) {
-	if NewAiEmbedder(AiEmbedderConfig{Standard: "nope"}) != nil {
+	if NewAiEmbedder(AiEmbedderConfig{Standard: "nope"}, NewModel(Gemma300mQAT)) != nil {
 		t.Fatal("expected nil for an unknown standard")
+	}
+}
+
+func TestNewModelUnlistedReturnsGeneralModel(t *testing.T) {
+	m := NewModel("text-embedding-nomic-embed-text-v1.5", 768)
+	if m == nil {
+		t.Fatal("expected a general model for an unlisted model id")
+	}
+	if m.Name() != "text-embedding-nomic-embed-text-v1.5" || m.Dimensions() != 768 {
+		t.Fatalf("general model not configured: name=%q dims=%d", m.Name(), m.Dimensions())
+	}
+}
+
+func TestNewGeneralModel(t *testing.T) {
+	m := NewGeneralModel("text-embedding-nomic-embed-text-v1.5", 512)
+	if m.Name() != "text-embedding-nomic-embed-text-v1.5" || m.Dimensions() != 512 {
+		t.Fatalf("general model not configured: name=%q dims=%d", m.Name(), m.Dimensions())
 	}
 }
 
@@ -146,43 +161,4 @@ func TestNewSQLiteVectorStorageOpens(t *testing.T) {
 		t.Fatalf("open sqlite-vec storage: %v", err)
 	}
 	defer store.Close()
-}
-
-// --- Search helpers ---
-
-func TestBuildSearchResultsResolvesInHitOrder(t *testing.T) {
-	hits := []storage.VectorHit{
-		{ChunkID: 7, Distance: 0.5},
-		{ChunkID: 9, Distance: 0.8},
-	}
-	metadata := []storage.ChunkMetadata{
-		{ChunkID: 9, DocumentID: 2, Title: "Refunds", Text: "refund the payment"},
-		{ChunkID: 7, DocumentID: 42, Title: "Payments", Text: "pay the invoice"},
-	}
-
-	results := buildSearchResults(hits, metadata)
-
-	if len(results) != 2 {
-		t.Fatalf("result count mismatch: %d", len(results))
-	}
-	if got := results[0]; got.ChunkID != 7 || got.DocumentID != 42 || got.Title != "Payments" || got.Text != "pay the invoice" || got.Score != 0.5 {
-		t.Fatalf("first result mismatch: %#v", got)
-	}
-	if results[1].ChunkID != 9 {
-		t.Fatalf("hit order not preserved: %#v", results)
-	}
-}
-
-func TestBuildSearchResultsSkipsMissingMetadata(t *testing.T) {
-	hits := []storage.VectorHit{{ChunkID: 1, Distance: 0.1}}
-	if results := buildSearchResults(hits, nil); len(results) != 0 {
-		t.Fatalf("expected no results when metadata is missing, got %d", len(results))
-	}
-}
-
-func TestHitChunkIDs(t *testing.T) {
-	ids := hitChunkIDs([]storage.VectorHit{{ChunkID: 3}, {ChunkID: 5}})
-	if len(ids) != 2 || ids[0] != 3 || ids[1] != 5 {
-		t.Fatalf("chunk ids mismatch: %v", ids)
-	}
 }

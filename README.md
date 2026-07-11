@@ -15,6 +15,39 @@
 <br>It <strong>recursively indexes</strong> PDF, Markdown, code, and many other file types in a directory, then <strong>chunks</strong> them and stores them in a <strong>vector database</strong> using an <strong>embedding AI model</strong>.
 <br>It enables <strong>meaning-based search</strong> across your documents and works for both <strong>client-side</strong> and <strong>server-side</strong> solutions. Written in <strong>Go</strong>, it is <strong>portable</strong> and compiles easily to any platform, OS, client, or server.</p>
 
+## Contents
+
+- [What semantic search is](#what-semantic-search-is)
+- [Use cases](#use-cases)
+- [Supported formats](#supported-formats)
+- [How it works](#how-it-works)
+- [Architecture](#architecture)
+- [Requirements](#requirements)
+- [Install, build, test, lint](#install-build-test-lint)
+- [Usage](#usage)
+  - [Full example](#full-example)
+  - [In-memory SQLite (single process)](#in-memory-sqlite-single-process)
+  - [Server-side setup with PostgreSQL and pgvector](#server-side-setup-with-postgresql-and-pgvector)
+  - [Scaling up with HNSW](#scaling-up-with-hnsw)
+  - [Choosing an embedder model](#choosing-an-embedder-model)
+  - [Optimizing search with tasks](#optimizing-search-with-tasks)
+  - [Custom AI client](#custom-ai-client)
+- [Documents](#documents)
+- [License](#license)
+
+## What semantic search is
+
+Semantic search matches on meaning, not on shared words. A query and a result can rank as a
+strong match even when they have no words in common, because the search compares what they mean.
+
+| Search query | Search result |
+|---|---|
+| *a gift for someone who loves cooking* | The chef's guide to essential kitchen knives |
+| *how to feel less tired during the day* | Tips for building a better sleep routine |
+| *my plant's leaves are turning yellow* | Common causes of overwatering in houseplants |
+| *something fun to do with kids on a rainy day* | Indoor board games for the whole family |
+| *ways to stay warm in winter* | A guide to insulated jackets and wool layers |
+
 ## Use cases
 
 Semantic Search works both as an embedded engine inside client apps (using the SQLite store,
@@ -45,9 +78,49 @@ on disk or in memory) and as a server-side knowledge base (using PostgreSQL and 
 4. **Embed**: turn chunks into vectors via the embedding server.
 5. **Search**: embed the query and rank chunks by vector distance using exact k-nearest-neighbor (kNN) search, comparing against every chunk for precise results.
 
+## Architecture
+
+The **Engine** is the single entry point. It runs two flows, indexing files and searching.
+Both use the same building blocks. **Strategies** turn files into text chunks. An **embedding
+model** and an **AI client** turn text into vectors. Two stores keep the document metadata and
+the vectors.
+
+```mermaid
+flowchart TD
+    App[Your application] --> Engine
+
+    subgraph Engine [Semantic Search Engine Facade]
+        Index[Index flow]
+        Search[Search flow]
+    end
+
+    Index --> Strategies[Strategies<br/>Markdown · PDF · Code · Text · DOCX]
+    Search --> Model
+    Strategies --> Model[Embedding model<br/>prompt templates]
+    Model --> Client[AI client<br/>OpenAI-compatible transport]
+    Client --> Server[(Embedding server<br/>LM Studio · Ollama · remote)]
+
+    Index --> Meta[(Metadata store<br/>SQLite · PostgreSQL)]
+    Index --> Vectors[(Vector store<br/>sqlite-vec · pgvector)]
+    Search --> Vectors
+    Search --> Meta
+
+    classDef blue fill:#E6F7FC,stroke:#10C2EB,stroke-width:2px,color:#0A5A72;
+    classDef accent fill:#FFF3DC,stroke:#F5A623,stroke-width:2px,color:#8A5410;
+
+    class App,Index,Search,Strategies blue;
+    class Model,Client,Server,Meta,Vectors accent;
+```
+
+- **Strategies** claim files by type and split them into chunks; the AI client sends each chunk
+  to the embedding server and gets back a vector.
+- **Indexing** stores the document metadata and the vectors in their two stores.
+- **Searching** embeds the query the same way, finds the nearest vectors, and resolves them back
+  to their documents through the metadata store.
+
 ## Requirements
 
-- **Every use case** needs an **OpenAI-compatible embedding server**: on your own machine (LM Studio, Ollama, or llama.cpp), or on a remote host (Google AI Studio or any other server that speaks the standard protocol).
+- **Every use case** needs an **OpenAI-compatible embedding server** (it does not mean actual OpenAI models): on your own machine (LM Studio, Ollama, or llama.cpp), or on a remote host (Google AI Studio or any other server that speaks the standard protocol).
 - **For client-side apps** (desktop, mobile, CLI), you also need a **C compiler**,
   because cgo builds `mattn/go-sqlite3` and the `sqlite-vec` bindings from source:
   - **macOS**: `xcode-select --install` (Clang)
@@ -96,23 +169,23 @@ import (
 )
 
 func main() {
+	// Configure the search engine. You compose it from an embedder that turns
+	// text into vectors, a metadata store, a vector store, and the strategies
+	// that decide which file types are handled and how each one is parsed and
+	// chunked.
 	ctx := context.Background()
-
-	// Configure the search engine. You compose it from an embedder that turns text
-	// into vectors, a metadata store, a vector store, and the strategies that decide
-	// which file types are handled and how each one is parsed and chunked.
 	store, _ := semanticsearch.NewSQLiteStorage(ctx, "index.db")
 	defer store.Close()
 	vectors, _ := semanticsearch.NewSQLiteVectorStorage(ctx, "vectors.db", 768)
 	defer vectors.Close()
+	model := semanticsearch.NewModel(semanticsearch.Gemma300mQAT)
 
 	engine, err := semanticsearch.NewEngine(semanticsearch.Config{
+		Model: model,
 		Embedder: semanticsearch.NewAiEmbedder(semanticsearch.AiEmbedderConfig{
-			Standard:   semanticsearch.StandardOpenAI,
-			BaseURL:    "http://127.0.0.1:1234",
-			Model:      "text-embedding-embeddinggemma-300m-qat",
-			Dimensions: 768,
-		}),
+			Standard: semanticsearch.StandardOpenAI,
+			BaseURL:  "http://127.0.0.1:1234",
+		}, model),
 		Storage:       store,
 		VectorStorage: vectors,
 		Strategies: []semanticsearch.StrategyFactory{
@@ -127,16 +200,16 @@ func main() {
 		panic(err)
 	}
 
-	// Index the directory. The engine maps the directory recursively, parses every
-	// supported file, splits each one into chunks, and embeds those chunks into
-	// vectors with the AI model.
+	// Index the directory. The engine maps the directory recursively, parses
+	// every supported file, splits each one into chunks, and embeds those
+	// chunks into vectors with the AI model.
 	if err := engine.Index(ctx, "./docs", semanticsearch.IndexOptions{}); err != nil {
 		panic(err)
 	}
 
-	// Search the indexed content. The query is embedded the same way, and the engine
-	// returns the chunks whose meaning is closest to it, so results are matched by
-	// meaning rather than exact keywords.
+	// Search the indexed content. The query is embedded the same way, and
+	// the engine returns the chunks whose meaning is closest to it, so
+	// results are matched by meaning rather than exact keywords.
 	results, _ := engine.Search(ctx, "how do I detect security threats in logs", 5)
 	for _, r := range results {
 		fmt.Printf("%s  (score %.4f)\n%s\n", r.Title, r.Score, r.Text)
@@ -184,24 +257,82 @@ If your vector database runs on the server side, you can reasonably scale it up.
 vectors, _ := semanticsearch.NewPostgresVectorStorage(ctx, dsn, 768, semanticsearch.PostgresHNSW)
 ```
 
-### Custom embedder
+### Choosing an embedder model
 
-The built-in `NewAiEmbedder` speaks the OpenAI-compatible protocol with an optional `APIKey`
-(sent as a Bearer token). For anything it does not cover, such as rotating OAuth tokens (e.g. production Vertex AI), request signing (e.g. AWS Bedrock), or a non-OpenAI wire format, implement the
-embedder interface yourself and inject it. It is a single method:
+The model interface defines the model's name, dimension size, data structure format, and search query format. The example uses Gemma, which has 300 million parameters and 768 dimensions. It is a reasonable embedder model that can run locally. **Changing models can significantly impact your application’s performance.**
 
 ```go
-type myEmbedder struct {
+model := semanticsearch.NewModel(semanticsearch.Gemma300mQAT)
+```
+
+There are other pre-defined models available in this library:
+
+- `semanticsearch.NewModel(semanticsearch.Gemma300mQAT)` loads **text-embedding-embeddinggemma-300m-qat** (768 dim)
+- `semanticsearch.NewModel(semanticsearch.Nomic768)` loads **text-embedding-nomic-embed-text-v1.5** (768 dim)
+- `semanticsearch.NewModel(semanticsearch.E5Large1024)` loads **text-embedding-multilingual-e5-large** (1024 dim)
+- `semanticsearch.NewModel(semanticsearch.BGELarge1024)` loads **text-embedding-bge-large-en-v1.5** (1024 dim)
+- `semanticsearch.NewModel(semanticsearch.Qwen30_6B1024)` loads **text-embedding-qwen3-embedding-0.6b** (1024 dim)
+- `semanticsearch.NewModel(semanticsearch.MxbaiLarge1024)` loads **text-embedding-mxbai-embed-large-v1** (1024 dim)
+
+For any other model that needs no prompt templates, use `NewGeneralModel` with the model id and vector size. Switching models or dimensions is just a different argument.
+
+```go
+model := semanticsearch.NewGeneralModel("text-embedding-nomic-embed-text-v1.5", 768)
+```
+
+If a model needs its own prompt templates, implement the `EmbeddingModel` interface and inject it.
+
+```go
+type myModel struct{}
+
+func (myModel) Name() string       { return "my-embedding-model" }
+func (myModel) Dimensions() int    { return 1024 }
+func (myModel) BuildData(chunk storage.Chunk) string { return chunk.Text }
+func (myModel) BuildQuery(query, taskType string) (string, error) { return query, nil }
+
+// semanticsearch.NewEngine(semanticsearch.Config{ Model: myModel{}, ... })
+```
+
+### Optimizing search with tasks
+
+Models can search differently depending on the task, and the available tasks depend on the model. The task is an optional last argument to `Search`; leave it out to use the model's default retrieval task. For example, Gemma searches differently based on its task:
+
+```go
+semanticsearch.NewModel(semanticsearch.Gemma300mQAT)
+...
+engine.Search(ctx, "I want a spicy tea", 5)
+```
+
+```go
+semanticsearch.NewModel(semanticsearch.Gemma300mQAT)
+...
+engine.Search(ctx, "I want a spicy tea", 5, semanticsearch.TaskGemma.Classification)
+```
+
+Gemma has 7 tasks. Other models instead take free text as the task. For example:
+
+```go
+semanticsearch.NewModel(semanticsearch.Qwen30_6B1024)
+...
+engine.Search(ctx, "I want a spicy tea", 5, "Find the most exclusive product for this query")
+```
+
+### Custom AI client
+
+The built-in `NewAiEmbedder` returns an `OpenAIClient` that speaks the OpenAI-compatible protocol with an optional `APIKey` (sent as a Bearer token). For anything it does not cover, such as rotating OAuth tokens (e.g. production Vertex AI), request signing (e.g. AWS Bedrock), or a non-OpenAI wire format, implement the `AiClient` interface yourself and inject it. It is a single method:
+
+```go
+type myClient struct {
 	// your HTTP client, credentials, token cache, etc.
 }
 
-func (m myEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+func (c myClient) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	// Refresh your OAuth token / sign the request here, call your provider, and
 	// return one vector per input text, in the same order.
 }
 
-// Inject it like any other embedder:
-// semanticsearch.NewEngine(semanticsearch.Config{ Embedder: myEmbedder{...}, ... })
+// Inject it like any other client:
+// semanticsearch.NewEngine(semanticsearch.Config{ Embedder: myClient{}, ... })
 ```
 
 ## Documents

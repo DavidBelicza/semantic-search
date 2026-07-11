@@ -12,7 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/davidbelicza/semantic-search/core/embedder"
+	"github.com/davidbelicza/semantic-search/core/embedder/client"
+	"github.com/davidbelicza/semantic-search/core/embedder/model"
 	"github.com/davidbelicza/semantic-search/core/storage"
 	"github.com/davidbelicza/semantic-search/core/storage/pgvector"
 	"github.com/davidbelicza/semantic-search/core/storage/postgres"
@@ -33,7 +34,8 @@ import (
 // strategies. Each field is required. Every dependency is an interface, so a caller can supply
 // the built-in implementations (via the NewXxx constructors) or their own.
 type Config struct {
-	Embedder      strategy.Embedder
+	Model         strategy.EmbeddingModel
+	Embedder      strategy.AiClient
 	Storage       storage.Storage
 	VectorStorage storage.VectorStorage
 	Strategies    []StrategyFactory
@@ -42,7 +44,8 @@ type Config struct {
 // Engine is a configured index/search unit. Multiple engines with different embedders, stores,
 // and strategies can run independently and in parallel.
 type Engine struct {
-	embedder    strategy.Embedder
+	model       strategy.EmbeddingModel
+	embedder    strategy.AiClient
 	store       storage.Storage
 	vectorStore storage.VectorStorage
 	factories   []StrategyFactory
@@ -57,6 +60,7 @@ func NewEngine(config Config) (*Engine, error) {
 	}
 
 	return &Engine{
+		model:       config.Model,
 		embedder:    config.Embedder,
 		store:       config.Storage,
 		vectorStore: config.VectorStorage,
@@ -69,7 +73,7 @@ func NewEngine(config Config) (*Engine, error) {
 // any resources they open, like the PDF extractor) are built here and released when indexing
 // finishes.
 func (e *Engine) Index(ctx context.Context, rootPath string, options IndexOptions) error {
-	strategies, release, err := buildStrategies(e.factories, e.embedder)
+	strategies, release, err := buildStrategies(e.factories, e.model, e.embedder)
 	if err != nil {
 		return err
 	}
@@ -88,8 +92,11 @@ func (e *Engine) Index(ctx context.Context, rootPath string, options IndexOption
 	return pipeline.Process(ctx, e.store, e.vectorStore, pool, options.FailFast)
 }
 
-// Search embeds the query and returns the nearest chunk matches in similarity order.
-func (e *Engine) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
+// Search embeds the query and returns the nearest chunk matches in similarity order. An optional
+// task type tells the model how to phrase the query (see the Task* constants); omit it to use the
+// model's default retrieval task. Only the first value is used; passing a task type to a model
+// that does not support one returns an error.
+func (e *Engine) Search(ctx context.Context, query string, limit int, taskType ...string) ([]SearchResult, error) {
 	if limit <= 0 {
 		return nil, errors.New("limit must be greater than zero")
 	}
@@ -97,28 +104,12 @@ func (e *Engine) Search(ctx context.Context, query string, limit int) ([]SearchR
 		return nil, errors.New("search query is required")
 	}
 
-	vectors, err := e.embedder.Embed(ctx, []string{embedder.QueryPrefix + query})
-	if err != nil {
-		return nil, err
-	}
-	if len(vectors) != 1 {
-		return nil, fmt.Errorf("expected one query embedding, got %d", len(vectors))
+	task := ""
+	if len(taskType) > 0 {
+		task = taskType[0]
 	}
 
-	hits, err := e.vectorStore.Search(ctx, vectors[0], limit)
-	if err != nil {
-		return nil, err
-	}
-	if len(hits) == 0 {
-		return nil, nil
-	}
-
-	metadata, err := e.store.ChunkMetadataByIDs(ctx, hitChunkIDs(hits))
-	if err != nil {
-		return nil, err
-	}
-
-	return buildSearchResults(hits, metadata), nil
+	return pipeline.Search(ctx, e.store, e.vectorStore, e.model, e.embedder, query, task, limit)
 }
 
 // IndexOptions configures an index run.
@@ -132,13 +123,76 @@ type IndexOptions struct {
 }
 
 // SearchResult is one chunk match: the document it belongs to, the chunk id, its title
-// and text, and the score (vector distance from the query — lower is closer).
-type SearchResult struct {
-	DocumentID int64
-	ChunkID    int64
-	Title      string
-	Text       string
-	Score      float64
+// and text, and the score (vector distance from the query — lower is closer). It is defined
+// by the search pipeline and aliased here as part of the public API.
+type SearchResult = pipeline.SearchResult
+
+// --- Model ---
+
+// Model-specific query task types for Search. Any string is accepted; these are just the tasks
+// each model documents.
+var (
+	TaskGemma = model.GemmaTasks
+	TaskNomic = model.NomicTasks
+)
+
+// PredefinedModel selects one of the built-in embedding models by name. Each one bundles the
+// model's id, vector size, and the prompt templates it needs, so callers do not hand-write
+// templates. For a model that is not listed, implement strategy.EmbeddingModel yourself and inject it.
+type PredefinedModel string
+
+// Predefined embedding models. Each constant bundles a model id, its native vector size, and the
+// prompt templates the model requires. The dimension is encoded in the constant name so it is
+// visible at the call site (Gemma keeps its parameter-based name).
+const (
+	// Gemma300mQAT is EmbeddingGemma (text-embedding-embeddinggemma-300m-qat, 768 dimensions).
+	Gemma300mQAT PredefinedModel = "gemma-300m-qat"
+	// Nomic768 is Nomic Embed Text v1.5 (768 dimensions).
+	Nomic768 PredefinedModel = "nomic-v1.5"
+	// E5Large1024 is Multilingual E5 large (1024 dimensions).
+	E5Large1024 PredefinedModel = "e5-large"
+	// BGELarge1024 is BGE large en v1.5 (1024 dimensions).
+	BGELarge1024 PredefinedModel = "bge-large-en-v1.5"
+	// Qwen30_6B1024 is Qwen3 Embedding 0.6B (1024 dimensions).
+	Qwen30_6B1024 PredefinedModel = "qwen3-0.6b"
+	// MxbaiLarge1024 is mxbai embed large v1 (1024 dimensions).
+	MxbaiLarge1024 PredefinedModel = "mxbai-large-v1"
+)
+
+// NewModel builds the model knowledge (id, dimensions, prompt templates) for a predefined
+// model. Any value that is not a predefined constant is treated as a raw model id and returned
+// as a template-free GeneralModel with the given dimensions. The dimensions argument is
+// optional and ignored for predefined models that have a fixed vector size; supply it only for
+// an unlisted model id.
+func NewModel(predefined PredefinedModel, dimensions ...int) strategy.EmbeddingModel {
+	switch predefined {
+	case Gemma300mQAT:
+		return model.GemmaModel{}
+	case Nomic768:
+		return model.NomicModel{}
+	case E5Large1024:
+		return model.E5LargeModel{}
+	case BGELarge1024:
+		return model.BGELargeModel{}
+	case Qwen30_6B1024:
+		return model.Qwen3SmallModel{}
+	case MxbaiLarge1024:
+		return model.MxbaiLargeModel{}
+	}
+
+	dim := 0
+	if len(dimensions) > 0 {
+		dim = dimensions[0]
+	}
+
+	return model.NewGeneralModel(string(predefined), dim)
+}
+
+// NewGeneralModel builds a template-free model with the given model id and vector size, for any
+// OpenAI-standard model that needs no prompt templates. Switching models or vector sizes is
+// then just a different call, with no new type to implement.
+func NewGeneralModel(name string, dimensions int) strategy.EmbeddingModel {
+	return model.NewGeneralModel(name, dimensions)
 }
 
 // --- Embedder ---
@@ -151,13 +205,12 @@ type Standard string
 // most local servers).
 const StandardOpenAI Standard = "openai"
 
-// AiEmbedderConfig configures an AI embedder: which protocol to speak, and the endpoint,
-// model, and vector size to use.
+// AiEmbedderConfig configures the transport client: which protocol to speak and the endpoint,
+// auth, and timeout to use. The model id and vector size come from the injected Model, not
+// from here.
 type AiEmbedderConfig struct {
-	Standard   Standard
-	BaseURL    string
-	Model      string
-	Dimensions int
+	Standard Standard
+	BaseURL  string
 	// APIKey is optional. When set it is sent as an "Authorization: Bearer <APIKey>" header
 	// for hosted endpoints; leave it empty for local servers that need no authentication.
 	APIKey string
@@ -165,23 +218,22 @@ type AiEmbedderConfig struct {
 	Timeout time.Duration
 }
 
-// NewAiEmbedder builds an embedder for the given standard. It returns nil for an unknown
-// standard; NewEngine rejects a nil embedder.
-func NewAiEmbedder(config AiEmbedderConfig) strategy.Embedder {
-	if config.Standard != StandardOpenAI {
+// NewAiEmbedder builds the transport client for the given standard, configured to send the
+// model's id and validate its vector size. It returns nil for an unknown standard or a nil
+// model; NewEngine rejects a nil embedder.
+func NewAiEmbedder(config AiEmbedderConfig, model strategy.EmbeddingModel) strategy.AiClient {
+	if config.Standard != StandardOpenAI || model == nil {
 		return nil
 	}
 
-	client := embedder.NewOpenAIEmbedder(config.BaseURL, config.Model)
-	if config.Dimensions > 0 {
-		client.Dimensions = config.Dimensions
-	}
-	client.APIKey = config.APIKey
+	c := client.NewOpenAIClient(config.BaseURL, model.Name())
+	c.Dimensions = model.Dimensions()
+	c.APIKey = config.APIKey
 	if config.Timeout > 0 {
-		client.HTTPClient = &http.Client{Timeout: config.Timeout}
+		c.HTTPClient = &http.Client{Timeout: config.Timeout}
 	}
 
-	return client
+	return c
 }
 
 // --- Storage ---
@@ -261,21 +313,22 @@ func NewPostgresVectorStorage(ctx context.Context, dsn string, dimensions int, i
 
 // StrategyFactory is a deferred strategy: it declares the extensions the strategy claims (so
 // the engine can reject duplicates before indexing) and builds the strategy once the engine
-// supplies the shared embedder. Build may return a cleanup the engine runs after indexing
-// (e.g. to release the PDF extractor); the cleanup is nil when there is nothing to release.
+// supplies the shared model and embedder. Build may return a cleanup the engine runs after
+// indexing (e.g. to release the PDF extractor); the cleanup is nil when there is nothing to
+// release.
 //
 // To register a custom strategy, construct a StrategyFactory whose Build returns it.
 type StrategyFactory struct {
 	Extensions []string
-	Build      func(embedder strategy.Embedder) (strategy.Strategy, func() error, error)
+	Build      func(model strategy.EmbeddingModel, embedder strategy.AiClient) (strategy.Strategy, func() error, error)
 }
 
 // NewMarkdownStrategy registers the Markdown strategy.
 func NewMarkdownStrategy() StrategyFactory {
 	return StrategyFactory{
 		Extensions: []string{".md", ".markdown", ".mdown"},
-		Build: func(embedder strategy.Embedder) (strategy.Strategy, func() error, error) {
-			return markdown.NewMarkdownStrategy(general.NewGeneralStrategy(embedder)), nil, nil
+		Build: func(model strategy.EmbeddingModel, embedder strategy.AiClient) (strategy.Strategy, func() error, error) {
+			return markdown.NewMarkdownStrategy(general.NewGeneralStrategy(model, embedder)), nil, nil
 		},
 	}
 }
@@ -285,13 +338,13 @@ func NewMarkdownStrategy() StrategyFactory {
 func NewPDFStrategy() StrategyFactory {
 	return StrategyFactory{
 		Extensions: []string{".pdf"},
-		Build: func(embedder strategy.Embedder) (strategy.Strategy, func() error, error) {
+		Build: func(model strategy.EmbeddingModel, embedder strategy.AiClient) (strategy.Strategy, func() error, error) {
 			extractor, err := pdf.NewPDFium()
 			if err != nil {
 				return nil, nil, err
 			}
 
-			return pdf.NewPDFStrategy(general.NewGeneralStrategy(embedder), extractor), extractor.Close, nil
+			return pdf.NewPDFStrategy(general.NewGeneralStrategy(model, embedder), extractor), extractor.Close, nil
 		},
 	}
 }
@@ -300,8 +353,8 @@ func NewPDFStrategy() StrategyFactory {
 func NewCodeStrategy() StrategyFactory {
 	return StrategyFactory{
 		Extensions: []string{".go", ".js", ".ts", ".jsx", ".tsx", ".py", ".php", ".java", ".rb", ".rs", ".c", ".h", ".cpp", ".hpp", ".cs", ".sh", ".sql"},
-		Build: func(embedder strategy.Embedder) (strategy.Strategy, func() error, error) {
-			return code.NewCodeStrategy(general.NewGeneralStrategy(embedder)), nil, nil
+		Build: func(model strategy.EmbeddingModel, embedder strategy.AiClient) (strategy.Strategy, func() error, error) {
+			return code.NewCodeStrategy(general.NewGeneralStrategy(model, embedder)), nil, nil
 		},
 	}
 }
@@ -310,8 +363,8 @@ func NewCodeStrategy() StrategyFactory {
 func NewDocxStrategy() StrategyFactory {
 	return StrategyFactory{
 		Extensions: []string{".docx"},
-		Build: func(embedder strategy.Embedder) (strategy.Strategy, func() error, error) {
-			return docx.NewDocxStrategy(general.NewGeneralStrategy(embedder)), nil, nil
+		Build: func(model strategy.EmbeddingModel, embedder strategy.AiClient) (strategy.Strategy, func() error, error) {
+			return docx.NewDocxStrategy(general.NewGeneralStrategy(model, embedder)), nil, nil
 		},
 	}
 }
@@ -320,8 +373,8 @@ func NewDocxStrategy() StrategyFactory {
 func NewTextStrategy() StrategyFactory {
 	return StrategyFactory{
 		Extensions: []string{".txt", ".text", ".log", ".rst", ".org", ".adoc"},
-		Build: func(embedder strategy.Embedder) (strategy.Strategy, func() error, error) {
-			return general.NewGeneralStrategy(embedder), nil, nil
+		Build: func(model strategy.EmbeddingModel, embedder strategy.AiClient) (strategy.Strategy, func() error, error) {
+			return general.NewGeneralStrategy(model, embedder), nil, nil
 		},
 	}
 }
@@ -330,6 +383,8 @@ func NewTextStrategy() StrategyFactory {
 
 func validateConfig(config Config) error {
 	switch {
+	case config.Model == nil:
+		return errors.New("model is required")
 	case config.Embedder == nil:
 		return errors.New("embedder is required")
 	case config.Storage == nil:
@@ -362,7 +417,7 @@ func validateNoDuplicateExtensions(factories []StrategyFactory) error {
 // buildStrategies runs each factory with the shared embedder. It returns the strategies and a
 // single release function that closes everything they opened. If a factory fails it releases
 // whatever was opened so far and returns the error, so the caller just propagates it.
-func buildStrategies(factories []StrategyFactory, embedder strategy.Embedder) ([]strategy.Strategy, func(), error) {
+func buildStrategies(factories []StrategyFactory, model strategy.EmbeddingModel, embedder strategy.AiClient) ([]strategy.Strategy, func(), error) {
 	strategies := make([]strategy.Strategy, 0, len(factories))
 	var closers []func() error
 	release := func() {
@@ -372,7 +427,7 @@ func buildStrategies(factories []StrategyFactory, embedder strategy.Embedder) ([
 	}
 
 	for _, factory := range factories {
-		built, closer, err := factory.Build(embedder)
+		built, closer, err := factory.Build(model, embedder)
 		if err != nil {
 			release()
 			return nil, nil, err
@@ -384,37 +439,4 @@ func buildStrategies(factories []StrategyFactory, embedder strategy.Embedder) ([
 	}
 
 	return strategies, release, nil
-}
-
-func hitChunkIDs(hits []storage.VectorHit) []int64 {
-	ids := make([]int64, len(hits))
-	for i, hit := range hits {
-		ids[i] = hit.ChunkID
-	}
-
-	return ids
-}
-
-func buildSearchResults(hits []storage.VectorHit, metadata []storage.ChunkMetadata) []SearchResult {
-	byID := make(map[int64]storage.ChunkMetadata, len(metadata))
-	for _, item := range metadata {
-		byID[item.ChunkID] = item
-	}
-
-	results := make([]SearchResult, 0, len(hits))
-	for _, hit := range hits {
-		item, ok := byID[hit.ChunkID]
-		if !ok {
-			continue
-		}
-		results = append(results, SearchResult{
-			DocumentID: item.DocumentID,
-			ChunkID:    item.ChunkID,
-			Title:      item.Title,
-			Text:       item.Text,
-			Score:      hit.Distance,
-		})
-	}
-
-	return results
 }
