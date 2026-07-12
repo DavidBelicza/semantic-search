@@ -12,8 +12,9 @@ import (
 
 const (
 	// maxSearchChunks is the fixed number of top-ranked chunks the vector search returns before
-	// grouping into documents.
-	maxSearchChunks = 1000
+	// grouping into documents. 4096 is sqlite-vec's hard limit on KNN k, so it is the ceiling for
+	// the embedded backend.
+	maxSearchChunks = 4096
 	// defaultMaxDocuments and defaultMaxChunks apply when the caller leaves them zero in the config.
 	defaultMaxDocuments = 20
 	defaultMaxChunks    = 3
@@ -81,11 +82,11 @@ func (s documentSearcher) Search(ctx context.Context, config search.SearchConfig
 }
 
 // filterByRelevance keeps only matches at least as relevant as min. Results are ordered by
-// ascending distance (descending relevance), so it stops at the first match below min.
+// descending relevance, so it stops at the first match below min.
 func filterByRelevance(results []search.SearchResult, min float64) []search.SearchResult {
 	kept := make([]search.SearchResult, 0, len(results))
 	for _, result := range results {
-		if relevance(result.Score) < min {
+		if result.Score < min {
 			break
 		}
 		kept = append(kept, result)
@@ -287,7 +288,8 @@ func fillChunkText(chunks []search.SearchResult, byID map[int64]storage.ChunkMet
 }
 
 // buildRankedResults resolves ranked hits to their document ids, preserving hit order and skipping
-// any hit with no mapping. Text and title are left empty; they are hydrated for survivors only.
+// any hit with no mapping. Score is the hit's relevance; text and title are left empty and hydrated
+// for survivors only.
 func buildRankedResults(hits []storage.VectorHit, mapping []storage.ChunkDocument) []search.SearchResult {
 	docByChunk := make(map[int64]int64, len(mapping))
 	for _, item := range mapping {
@@ -303,7 +305,7 @@ func buildRankedResults(hits []storage.VectorHit, mapping []storage.ChunkDocumen
 		results = append(results, search.SearchResult{
 			DocumentID: documentID,
 			ChunkID:    hit.ChunkID,
-			Score:      hit.Distance,
+			Score:      relevance(hit.Distance),
 		})
 	}
 

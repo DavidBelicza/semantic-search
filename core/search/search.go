@@ -26,7 +26,8 @@ type SearchConfig struct {
 	MaxChunks int
 }
 
-// SearchResult is one match: the chunk's identity and text plus its distance score.
+// SearchResult is one match: the chunk's identity and text plus its relevance score (0 to 1,
+// higher is closer).
 type SearchResult struct {
 	DocumentID int64
 	ChunkID    int64
@@ -36,7 +37,7 @@ type SearchResult struct {
 }
 
 // DocumentResult is one document match: its id, its file name and absolute path, its relevance
-// score (its best chunk), and the chunks that matched inside it, ranked best first.
+// score (0 to 1, its best chunk), and the chunks that matched inside it, ranked best first.
 type DocumentResult struct {
 	DocumentID   int64
 	FileName     string

@@ -15,13 +15,13 @@ func TestHitChunkIDs(t *testing.T) {
 	}
 }
 
-// ranked hits: doc 42 (0.1, 0.3), doc 7 (0.2), doc 9 (0.4). Best-first order.
+// ranked results by relevance, best-first: doc 42 (0.95, 0.85), doc 7 (0.90), doc 9 (0.80).
 func sampleResults() []search.SearchResult {
 	return []search.SearchResult{
-		{DocumentID: 42, ChunkID: 1, Score: 0.1},
-		{DocumentID: 7, ChunkID: 2, Score: 0.2},
-		{DocumentID: 42, ChunkID: 3, Score: 0.3},
-		{DocumentID: 9, ChunkID: 4, Score: 0.4},
+		{DocumentID: 42, ChunkID: 1, Score: 0.95},
+		{DocumentID: 7, ChunkID: 2, Score: 0.90},
+		{DocumentID: 42, ChunkID: 3, Score: 0.85},
+		{DocumentID: 9, ChunkID: 4, Score: 0.80},
 	}
 }
 
@@ -31,7 +31,7 @@ func TestGroupDocumentsRanksByBestChunk(t *testing.T) {
 	if len(docs) != 3 {
 		t.Fatalf("document count mismatch: %d", len(docs))
 	}
-	if docs[0].DocumentID != 42 || docs[0].Score != 0.1 || len(docs[0].Chunks) != 2 {
+	if docs[0].DocumentID != 42 || docs[0].Score != 0.95 || len(docs[0].Chunks) != 2 {
 		t.Fatalf("first document mismatch: %#v", docs[0])
 	}
 	if docs[1].DocumentID != 7 || docs[2].DocumentID != 9 {
@@ -59,10 +59,10 @@ func TestGroupDocumentsCapsChunksPerDocument(t *testing.T) {
 }
 
 func TestFilterByRelevanceKeepsAtLeastMin(t *testing.T) {
-	results := sampleResults() // distances 0.1, 0.2, 0.3, 0.4 => relevance 0.95, 0.90, 0.85, 0.80
+	results := sampleResults() // relevance 0.95, 0.90, 0.85, 0.80
 
 	kept := filterByRelevance(results, 0.88)
-	if len(kept) != 2 || kept[1].Score != 0.2 {
+	if len(kept) != 2 || kept[1].Score != 0.90 {
 		t.Fatalf("expected the two matches at relevance >= 0.88, got %#v", kept)
 	}
 

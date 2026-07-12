@@ -24,6 +24,7 @@
 - [Architecture](#architecture)
 - [Requirements](#requirements)
 - [Install, build, test, lint](#install-build-test-lint)
+- [Examples](#examples)
 - [Usage](#usage)
   - [Full example](#full-example)
   - [In-memory SQLite (single process)](#in-memory-sqlite-single-process)
@@ -147,6 +148,31 @@ Working on the library itself:
 go build ./...   # build (cgo)
 make test        # go test ./...
 make lint        # golangci-lint
+```
+
+## Examples
+
+Runnable programs live in [`examples/`](examples), each a single `main` that indexes the sample
+files in [`examples/files`](examples/files) and searches them. They need an OpenAI-compatible
+embedding server on `http://127.0.0.1:1234` (e.g. LM Studio) serving EmbeddingGemma.
+
+- **basic**: index into on-disk SQLite and run a search.
+- **searchconfig**: tune results with `SearchConfig` (task, minimum relevance, document and chunk limits).
+- **postgres**: the server-side setup on PostgreSQL with pgvector.
+
+```sh
+git clone https://github.com/DavidBelicza/semantic-search.git
+cd semantic-search
+
+go run ./examples/basic
+go run ./examples/searchconfig
+```
+
+The postgres example needs the bundled database running first:
+
+```sh
+docker compose -f test/docker/docker-compose.yml up -d
+go run ./examples/postgres
 ```
 
 ## Usage

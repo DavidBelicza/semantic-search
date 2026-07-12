@@ -129,8 +129,8 @@ type IndexOptions struct {
 type SearchConfig = search.SearchConfig
 
 // SearchResult is one chunk match: the document it belongs to, the chunk id, its title
-// and text, and the score (vector distance from the query — lower is closer). It is defined
-// in core/search and re-exported here for a single-import public API.
+// and text, and the relevance score (0 to 1, higher is closer). It is defined in core/search
+// and re-exported here for a single-import public API.
 type SearchResult = search.SearchResult
 
 // DocumentResult is one document match: its id, file name and path, relevance score, and the
