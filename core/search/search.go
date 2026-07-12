@@ -23,3 +23,13 @@ type SearchResult struct {
 	Text       string
 	Score      float64
 }
+
+// DocumentResult is one document match: its id, its file name and absolute path, its relevance
+// score (its best chunk), and the chunks that matched inside it, ranked best first.
+type DocumentResult struct {
+	DocumentID   int64
+	FileName     string
+	AbsolutePath string
+	Score        float64
+	Chunks       []SearchResult
+}

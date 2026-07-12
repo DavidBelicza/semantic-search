@@ -329,6 +329,35 @@ func (s *Store) ChunkMetadataByIDs(ctx context.Context, chunkIDs []int64) ([]sto
 	return metadata, nil
 }
 
+// DocumentsByIDs returns the identity (id and absolute path) of the given documents. Other
+// Document fields are left zero; this is a lookup for search result assembly.
+func (s *Store) DocumentsByIDs(ctx context.Context, documentIDs []int64) ([]storage.Document, error) {
+	if len(documentIDs) == 0 {
+		return nil, nil
+	}
+
+	query, args := inQuery("SELECT id, absolute_path FROM documents WHERE id IN (", documentIDs)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var documents []storage.Document
+	for rows.Next() {
+		var document storage.Document
+		if err := rows.Scan(&document.ID, &document.AbsolutePath); err != nil {
+			return nil, err
+		}
+		documents = append(documents, document)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return documents, nil
+}
+
 func (s *Store) ChunksByDocumentID(ctx context.Context, documentID int64) ([]storage.Chunk, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, document_id, chunk_index, title, text, token_count, start_offset, end_offset, content_hash
