@@ -1,17 +1,18 @@
 # Architecture
 
-Local, private semantic search over Markdown and PDF files. Files are discovered, chunked,
-embedded with a local model, and stored in SQLite; search is exact (brute-force) vector
-similarity. Nothing leaves the machine.
+A Go library for semantic search over a directory of files (Markdown, PDF, code, DOCX, plain
+text). Files are discovered, chunked, and embedded through an OpenAI-compatible model server,
+then stored either embedded in SQLite or server-side in PostgreSQL. Search embeds the query,
+ranks chunks by vector similarity, and returns the matching documents.
 
 ## Layers
 
 ```
-main.go              thin entry — calls cmd.Execute
-cmd/                 CLI (cobra): index, search. Parses input, proxies to pkg.
-pkg/                 bootstrapper (package semanticsearch): builds the object graph
-                     and runs the pipelines. Public API: Index, Search.
-internal/pipeline    the flow — functions that move between files
+semanticsearch.go    library facade (package semanticsearch): builds the object graph
+                     and exposes Index, Search, and the constructors
+internal/pipeline    the flow — indexing and the document search
+core/search          public search types (SearchConfig, SearchResult, DocumentResult)
+                     and the Searcher seam
 core/strategy        the per-file contract (Strategy interface) + Pool; concrete
                      strategies live in subpackages:
                        strategy/general   base structured strategy + chunking engine
@@ -20,8 +21,10 @@ core/strategy        the per-file contract (Strategy interface) + Pool; concrete
                        strategy/code      code parsing (Chroma lexer) + definition sections
                        strategy/docx      DOCX parsing (zip + XML) + heading sections
 core/storage         resource entities (Document, Chunk, …); no database code
-  storage/sqlite     documents + chunks tables (source of truth)
-  storage/sqlitevec  sqlite-vec vectors
+  storage/sqlite     documents + chunks tables — embedded source of truth
+  storage/sqlitevec  sqlite-vec vectors — embedded
+  storage/postgres   documents + chunks tables — server-side source of truth
+  storage/pgvector   pgvector vectors — server-side
 internal/textproc    generic, dependency-free text utilities (split, window, tokens,
                      hash, normalize, part packing, heading-path stack)
 internal/fs          stable file identity (device + inode)
@@ -30,9 +33,10 @@ core/embedder
   model              the model definitions (id, dimensions, prompt templates; e.g. Gemma)
 ```
 
-Rule of thumb: `internal/*` provides the parts, `pkg` assembles them, `cmd` exposes them,
-`main` starts them. Dependencies point downward: `textproc` and `storage` depend on
-nothing of ours; strategies depend on both; the pipeline depends on the strategy contract.
+Rule of thumb: `internal/*` and `core/*` provide the parts; the root `semanticsearch` package
+assembles them into an `Engine` that callers drive. Dependencies point downward: `textproc` and
+`storage` depend on nothing of ours; strategies depend on both; the pipeline depends on the
+strategy contract.
 
 ## Strategy — the per-file recipe
 
@@ -90,14 +94,21 @@ short-circuited (fingerprint match) so they are never re-chunked or re-embedded.
 
 The resource entities (`Document`, `Chunk`, `ChunkEmbedding`, `FileMetadata`, status
 constants) live in `core/storage` and depend on no database, so business logic can
-reference the model without coupling to a store. One SQLite file holds the data:
+reference the model without coupling to a store. Two backends implement the same interfaces,
+and in both the document/chunk metadata and the vectors are **separate stores**:
 
-- `core/storage/sqlite` — `documents` and `chunks` tables. Source of truth (chunk text
-  lives here).
-- `core/storage/sqlitevec` — a sqlite-vec `vec0` virtual table (`chunk_vectors`) with
-  the embeddings. Search is exact KNN over unit-normalized vectors (L2 ranks as cosine).
-  See [research/sqlite-vec-migration.md](research/sqlite-vec-migration.md) and
-  [research/vector-search-scaling.md](research/vector-search-scaling.md).
+- **Embedded** — `core/storage/sqlite` holds the `documents` and `chunks` tables (source of
+  truth for chunk text); `core/storage/sqlitevec` holds the embeddings in a sqlite-vec `vec0`
+  virtual table (`chunk_vectors`). Search is exact KNN over unit-normalized vectors (L2 ranks
+  as cosine).
+- **Server-side** — `core/storage/postgres` holds the same tables in PostgreSQL;
+  `core/storage/pgvector` holds the embeddings in a pgvector table. Search is exact KNN by
+  default, or approximate through an opt-in HNSW index.
+
+Because metadata and vectors are separate stores (separate files in the embedded case),
+grouping search hits into documents happens in Go, not as a SQL join. See
+[research/sqlite-vec-migration.md](research/sqlite-vec-migration.md) and
+[research/vector-search-scaling.md](research/vector-search-scaling.md).
 
 ## Embedding
 
@@ -107,6 +118,32 @@ is the transport client speaking the OpenAI-compatible API. Keeping them separat
 same client serve any model. The default model is `EmbeddingGemma-300m-qat` (768-dim); its
 `BuildData`/`BuildQuery` apply the templates documents and queries need — omitting them badly
 degrades ranking.
+
+## Search — query to documents
+
+`Engine.Search` takes a `SearchConfig` and returns `DocumentResult`s, most relevant first, each
+carrying the chunks that matched inside it. Chunks stay an internal detail — they are how a
+document is embedded and matched, but the caller always gets documents. The flow lives in
+`internal/pipeline`, behind the public `search.Searcher` seam so the whole algorithm is
+replaceable (inject a `Searcher` through the engine config):
+
+1. **Phrase and embed** the query with the model and AI client.
+2. **Fetch** the top `maxSearchChunks` (4096, sqlite-vec's hard limit on KNN `k`) nearest chunk
+   hits from the vector store. This is a fixed internal cap, not a caller knob: it bounds the work
+   on very large indexes while staying cheap, because this stage carries only chunk ids and scores,
+   no text.
+3. **Map and filter** — a light `chunk_id → document_id` lookup (no text) resolves each hit to its
+   document, and matches below `MinRelevance` are dropped.
+4. **Group** the ranked chunks into documents; a document's score is its best (most relevant)
+   chunk, and documents come out ordered by that score.
+5. **Cap** to `MaxDocuments` documents and `MaxChunks` chunks each.
+6. **Hydrate** only the survivors: load text and title for the kept chunks and each document's
+   path. Deferring the text load to this final step is what keeps the earlier stages light, so a
+   large fetch cap costs little.
+
+Relevance is `1 - distance/2` (both backends use a cosine-equivalent metric with distance in
+`[0, 2]`), so scores are 0–1 with higher meaning closer, matching how `MinRelevance` is set.
+`SearchConfig` defaults: `MinRelevance` 0 (keep everything), `MaxDocuments` 20, `MaxChunks` 3.
 
 ## Build
 

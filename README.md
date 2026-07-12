@@ -24,6 +24,7 @@
 - [Architecture](#architecture)
 - [Requirements](#requirements)
 - [Install, build, test, lint](#install-build-test-lint)
+- [Examples](#examples)
 - [Usage](#usage)
   - [Full example](#full-example)
   - [In-memory SQLite (single process)](#in-memory-sqlite-single-process)
@@ -31,6 +32,7 @@
   - [Scaling up with HNSW](#scaling-up-with-hnsw)
   - [Choosing an embedder model](#choosing-an-embedder-model)
   - [Optimizing search with tasks](#optimizing-search-with-tasks)
+  - [Other search configurations](#other-search-configurations)
   - [Custom AI client](#custom-ai-client)
 - [Documents](#documents)
 - [License](#license)
@@ -148,6 +150,31 @@ make test        # go test ./...
 make lint        # golangci-lint
 ```
 
+## Examples
+
+Runnable programs live in [`examples/`](examples), each a single `main` that indexes the sample
+files in [`examples/files`](examples/files) and searches them. They need an OpenAI-compatible
+embedding server on `http://127.0.0.1:1234` (e.g. LM Studio) serving EmbeddingGemma.
+
+- **basic**: index into on-disk SQLite and run a search.
+- **searchconfig**: tune results with `SearchConfig` (task, minimum relevance, document and chunk limits).
+- **postgres**: the server-side setup on PostgreSQL with pgvector.
+
+```sh
+git clone https://github.com/DavidBelicza/semantic-search.git
+cd semantic-search
+
+go run ./examples/basic
+go run ./examples/searchconfig
+```
+
+The postgres example needs the bundled database running first:
+
+```sh
+docker compose -f test/docker/docker-compose.yml up -d
+go run ./examples/postgres
+```
+
 ## Usage
 
 Semantic Search is a library. Copy the following into a Go file (for example `main.go`) to get
@@ -208,12 +235,12 @@ func main() {
 	}
 
 	// Search the indexed content. The query is embedded the same way, and
-	// the engine returns the chunks whose meaning is closest to it, so
-	// results are matched by meaning rather than exact keywords.
-	results, _ := engine.Search(ctx, "how do I detect security threats in logs", 5)
-	for _, r := range results {
-		fmt.Printf("%s  (score %.4f)\n%s\n", r.Title, r.Score, r.Text)
-	}
+	// the engine returns the documents whose meaning is closest to it, each
+	// carrying the chunks that matched inside it, so results are matched by
+	// meaning rather than exact keywords.
+	docs, _ := engine.Search(ctx, semanticsearch.SearchConfig{
+		Query: "how do I detect security threats in logs",
+	})
 }
 ```
 
@@ -300,13 +327,16 @@ Models can search differently depending on the task, and the available tasks dep
 ```go
 semanticsearch.NewModel(semanticsearch.Gemma300mQAT)
 ...
-engine.Search(ctx, "I want a spicy tea", 5)
+engine.Search(ctx, semanticsearch.SearchConfig{Query: "I want a spicy tea"})
 ```
 
 ```go
 semanticsearch.NewModel(semanticsearch.Gemma300mQAT)
 ...
-engine.Search(ctx, "I want a spicy tea", 5, semanticsearch.TaskGemma.Classification)
+engine.Search(ctx, semanticsearch.SearchConfig{
+	Query:    "I want a spicy tea",
+	TaskType: semanticsearch.TaskGemma.Classification,
+})
 ```
 
 Gemma has 7 tasks. Other models instead take free text as the task. For example:
@@ -314,7 +344,24 @@ Gemma has 7 tasks. Other models instead take free text as the task. For example:
 ```go
 semanticsearch.NewModel(semanticsearch.Qwen30_6B1024)
 ...
-engine.Search(ctx, "I want a spicy tea", 5, "Find the most exclusive product for this query")
+engine.Search(ctx, semanticsearch.SearchConfig{
+	Query:    "I want a spicy tea",
+	TaskType: "Find the most exclusive product for this query",
+})
+```
+
+### Other search configurations
+
+The search config also bounds the results: `MinRelevance` drops weak matches, `MaxDocuments` caps how many documents come back, and `MaxChunks` caps the chunks kept per document.
+
+```go
+engine.Search(ctx, semanticsearch.SearchConfig{
+	Query:        "I want a spicy tea",
+	TaskType:     semanticsearch.TaskGemma.QuestionAnswering,
+	MinRelevance: 0.3,
+	MaxDocuments: 10,
+	MaxChunks:    3,
+})
 ```
 
 ### Custom AI client

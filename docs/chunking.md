@@ -5,6 +5,12 @@ path + body); chunking slices those sections into token-budget chunks. The share
 lives in `strategy/general` (`ChunkSections`); each strategy supplies its own parsing and a
 chunk config (budget, overlap, how to split parts).
 
+Chunks are the retrieval unit: each is embedded and matched independently, but search groups
+the matching chunks back into their documents and returns documents (a document's relevance is
+its best chunk; `SearchConfig.MaxChunks` caps how many chunks each returned document keeps). A
+chunk's title — its heading path — is what appears as the chunk title in results. See
+[architecture.md](architecture.md) for the search flow.
+
 ## The shared engine (`strategy/general`)
 
 For each section:

@@ -55,6 +55,13 @@ type ChunkMetadata struct {
 	Text       string
 }
 
+// ChunkDocument maps a chunk to its document. It is the light lookup used to group ranked chunk
+// hits into documents without loading the chunk text.
+type ChunkDocument struct {
+	ChunkID    int64
+	DocumentID int64
+}
+
 // ChunkReconcilePlan describes how a document's stored chunks change on re-index: which are
 // kept as-is, which are newly inserted, and which stored ids are removed.
 type ChunkReconcilePlan struct {

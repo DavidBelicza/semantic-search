@@ -518,6 +518,86 @@ func chunkMetadataQuery(chunkIDs []int64) (string, []any) {
 	return "SELECT id, document_id, title, text FROM chunks WHERE id IN (" + strings.Join(placeholders, ", ") + ")", args
 }
 
+// ChunkDocumentIDs maps the given chunks to their documents without loading chunk text; it is the
+// light lookup search uses to group ranked hits before hydrating only the survivors.
+func (s *Store) ChunkDocumentIDs(ctx context.Context, chunkIDs []int64) ([]storage.ChunkDocument, error) {
+	if len(chunkIDs) == 0 {
+		return nil, nil
+	}
+
+	query, args := chunkDocumentIDsQuery(chunkIDs)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var mapping []storage.ChunkDocument
+	for rows.Next() {
+		var item storage.ChunkDocument
+		if err := rows.Scan(&item.ChunkID, &item.DocumentID); err != nil {
+			return nil, err
+		}
+		mapping = append(mapping, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return mapping, nil
+}
+
+func chunkDocumentIDsQuery(chunkIDs []int64) (string, []any) {
+	placeholders := make([]string, len(chunkIDs))
+	args := make([]any, len(chunkIDs))
+	for i, chunkID := range chunkIDs {
+		placeholders[i] = "?"
+		args[i] = chunkID
+	}
+
+	return "SELECT id, document_id FROM chunks WHERE id IN (" + strings.Join(placeholders, ", ") + ")", args
+}
+
+// DocumentsByIDs returns the identity (id and absolute path) of the given documents. Other
+// Document fields are left zero; this is a lookup for search result assembly.
+func (s *Store) DocumentsByIDs(ctx context.Context, documentIDs []int64) ([]storage.Document, error) {
+	if len(documentIDs) == 0 {
+		return nil, nil
+	}
+
+	query, args := documentsByIDsQuery(documentIDs)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var documents []storage.Document
+	for rows.Next() {
+		var document storage.Document
+		if err := rows.Scan(&document.ID, &document.AbsolutePath); err != nil {
+			return nil, err
+		}
+		documents = append(documents, document)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return documents, nil
+}
+
+func documentsByIDsQuery(documentIDs []int64) (string, []any) {
+	placeholders := make([]string, len(documentIDs))
+	args := make([]any, len(documentIDs))
+	for i, documentID := range documentIDs {
+		placeholders[i] = "?"
+		args[i] = documentID
+	}
+
+	return "SELECT id, absolute_path FROM documents WHERE id IN (" + strings.Join(placeholders, ", ") + ")", args
+}
+
 func (s *Store) ChunksByDocumentID(ctx context.Context, documentID int64) ([]storage.Chunk, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, document_id, chunk_index, title, text, token_count, start_offset, end_offset, content_hash

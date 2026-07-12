@@ -2,3 +2,5 @@
 *.db
 .tmp/
 .vscode/
+.claude/
+.codex/
