@@ -16,7 +16,7 @@ const (
 	maxSearchChunks = 1000
 	// defaultMinRelevance, defaultMaxDocuments, and defaultMaxChunks apply when the caller leaves
 	// them unset in the config.
-	defaultMinRelevance = 0.5
+	defaultMinRelevance = 0.2
 	defaultMaxDocuments = 20
 	defaultMaxChunks    = 2
 )
