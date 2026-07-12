@@ -14,6 +14,7 @@ import (
 
 	"github.com/davidbelicza/semantic-search/core/embedder/client"
 	"github.com/davidbelicza/semantic-search/core/embedder/model"
+	"github.com/davidbelicza/semantic-search/core/search"
 	"github.com/davidbelicza/semantic-search/core/storage"
 	"github.com/davidbelicza/semantic-search/core/storage/pgvector"
 	"github.com/davidbelicza/semantic-search/core/storage/postgres"
@@ -122,10 +123,14 @@ type IndexOptions struct {
 	FollowSymlinks bool
 }
 
+// SearchConfig is the whole input to a search: the query and its optional knobs. It is defined
+// in core/search and re-exported here for a single-import public API.
+type SearchConfig = search.SearchConfig
+
 // SearchResult is one chunk match: the document it belongs to, the chunk id, its title
 // and text, and the score (vector distance from the query — lower is closer). It is defined
-// by the search pipeline and aliased here as part of the public API.
-type SearchResult = pipeline.SearchResult
+// in core/search and re-exported here for a single-import public API.
+type SearchResult = search.SearchResult
 
 // --- Model ---
 

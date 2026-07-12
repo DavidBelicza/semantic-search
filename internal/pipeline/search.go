@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/davidbelicza/semantic-search/core/search"
 	"github.com/davidbelicza/semantic-search/core/storage"
 	"github.com/davidbelicza/semantic-search/core/strategy"
 )
@@ -19,19 +20,10 @@ type SearchVectorStore interface {
 	Search(ctx context.Context, query []float32, limit int) ([]storage.VectorHit, error)
 }
 
-// SearchResult is one match: the chunk's identity and text plus its distance score.
-type SearchResult struct {
-	DocumentID int64
-	ChunkID    int64
-	Title      string
-	Text       string
-	Score      float64
-}
-
 // Search is the query pipeline: it phrases the query for the model, embeds it, runs the vector
 // nearest-neighbor lookup, and resolves the hits back to chunk text and metadata. An empty
 // taskType uses the model's default retrieval task.
-func Search(ctx context.Context, store SearchStore, vectorStore SearchVectorStore, model strategy.EmbeddingModel, client strategy.AiClient, query string, taskType string, limit int) ([]SearchResult, error) {
+func Search(ctx context.Context, store SearchStore, vectorStore SearchVectorStore, model strategy.EmbeddingModel, client strategy.AiClient, query string, taskType string, limit int) ([]search.SearchResult, error) {
 	phrased, err := model.BuildQuery(query, taskType)
 	if err != nil {
 		return nil, err
@@ -63,19 +55,19 @@ func Search(ctx context.Context, store SearchStore, vectorStore SearchVectorStor
 
 // buildSearchResults resolves vector hits to their chunk metadata, preserving hit order and
 // skipping any hit whose metadata is missing.
-func buildSearchResults(hits []storage.VectorHit, metadata []storage.ChunkMetadata) []SearchResult {
+func buildSearchResults(hits []storage.VectorHit, metadata []storage.ChunkMetadata) []search.SearchResult {
 	byID := make(map[int64]storage.ChunkMetadata, len(metadata))
 	for _, item := range metadata {
 		byID[item.ChunkID] = item
 	}
 
-	results := make([]SearchResult, 0, len(hits))
+	results := make([]search.SearchResult, 0, len(hits))
 	for _, hit := range hits {
 		item, ok := byID[hit.ChunkID]
 		if !ok {
 			continue
 		}
-		results = append(results, SearchResult{
+		results = append(results, search.SearchResult{
 			DocumentID: item.DocumentID,
 			ChunkID:    item.ChunkID,
 			Title:      item.Title,
