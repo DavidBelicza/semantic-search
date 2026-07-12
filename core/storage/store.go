@@ -18,6 +18,7 @@ type Storage interface {
 	ApplyDocumentChunkReconcile(ctx context.Context, documentID int64, plan ChunkReconcilePlan) ([]Chunk, error)
 	ChunksByDocumentID(ctx context.Context, documentID int64) ([]Chunk, error)
 	ChunkMetadataByIDs(ctx context.Context, chunkIDs []int64) ([]ChunkMetadata, error)
+	ChunkDocumentIDs(ctx context.Context, chunkIDs []int64) ([]ChunkDocument, error)
 	DocumentsByIDs(ctx context.Context, documentIDs []int64) ([]Document, error)
 }
 
