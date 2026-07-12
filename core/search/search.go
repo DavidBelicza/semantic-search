@@ -1,7 +1,15 @@
-// Package search holds the public search domain types: the query configuration a caller passes
-// and the result types it gets back. They live in their own package so both the library facade
-// and the internal search pipeline can share them without an import cycle.
+// Package search holds the public search domain types: the query configuration a caller passes,
+// the result types it gets back, and the Searcher seam. They live in their own package so both the
+// library facade and the internal search pipeline can share them without an import cycle.
 package search
+
+import "context"
+
+// Searcher runs a search and returns the matching documents. It is the seam behind Engine.Search;
+// supply a custom implementation through the engine config to replace the whole search flow.
+type Searcher interface {
+	Search(ctx context.Context, config SearchConfig) ([]DocumentResult, error)
+}
 
 // SearchConfig is the whole input to a search: the query and its optional knobs.
 type SearchConfig struct {

@@ -115,16 +115,18 @@ func assertRetrieval(t *testing.T, engine *semanticsearch.Engine, dir string) {
 		{"working remotely from home policy", "remote"},              // → handbook.docx
 	}
 
+	noRelevanceFilter := 0.0
 	for _, tc := range cases {
-		results, err := engine.Search(ctx, tc.query, 3)
+		results, err := engine.Search(ctx, semanticsearch.SearchConfig{Query: tc.query, MinRelevance: &noRelevanceFilter})
 		if err != nil {
 			t.Fatalf("search %q: %v", tc.query, err)
 		}
-		if len(results) == 0 {
+		if len(results) == 0 || len(results[0].Chunks) == 0 {
 			t.Fatalf("query %q: no results", tc.query)
 		}
-		if !strings.Contains(strings.ToLower(results[0].Text), tc.want) {
-			t.Errorf("query %q: want top result containing %q, got title=%q text=%q", tc.query, tc.want, results[0].Title, results[0].Text)
+		top := results[0].Chunks[0]
+		if !strings.Contains(strings.ToLower(top.Text), tc.want) {
+			t.Errorf("query %q: want top result containing %q, got title=%q text=%q", tc.query, tc.want, top.Title, top.Text)
 		}
 	}
 }

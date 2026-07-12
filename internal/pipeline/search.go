@@ -34,15 +34,8 @@ type SearchVectorStore interface {
 	Search(ctx context.Context, query []float32, limit int) ([]storage.VectorHit, error)
 }
 
-// Searcher runs a search and returns matching documents. It is the internal seam behind the
-// facade's Search; promoting it to a public package for caller-supplied implementations is a
-// later option.
-type Searcher interface {
-	Search(ctx context.Context, config search.SearchConfig) ([]search.DocumentResult, error)
-}
-
-// documentSearcher is the one Searcher implementation: it holds the search dependencies and
-// groups the ranked chunk hits into documents.
+// documentSearcher is the default search.Searcher: it holds the search dependencies and groups the
+// ranked chunk hits into documents.
 type documentSearcher struct {
 	store       SearchStore
 	vectorStore SearchVectorStore
@@ -50,8 +43,8 @@ type documentSearcher struct {
 	client      strategy.AiClient
 }
 
-// NewDocumentSearcher builds the default Searcher from the search dependencies.
-func NewDocumentSearcher(store SearchStore, vectorStore SearchVectorStore, model strategy.EmbeddingModel, client strategy.AiClient) Searcher {
+// NewDocumentSearcher builds the default search.Searcher from the search dependencies.
+func NewDocumentSearcher(store SearchStore, vectorStore SearchVectorStore, model strategy.EmbeddingModel, client strategy.AiClient) search.Searcher {
 	return documentSearcher{store: store, vectorStore: vectorStore, model: model, client: client}
 }
 
@@ -321,66 +314,6 @@ func buildRankedResults(hits []storage.VectorHit, mapping []storage.ChunkDocumen
 		results = append(results, search.SearchResult{
 			DocumentID: documentID,
 			ChunkID:    hit.ChunkID,
-			Score:      hit.Distance,
-		})
-	}
-
-	return results
-}
-
-// Search is the chunk query behind the document search: it phrases the query for the model,
-// embeds it, runs the vector nearest-neighbor lookup, and resolves the hits back to chunk text and
-// metadata. An empty taskType uses the model's default retrieval task. It stays exported until the
-// facade delegates to the Searcher (then it becomes internal to this package).
-func Search(ctx context.Context, store SearchStore, vectorStore SearchVectorStore, model strategy.EmbeddingModel, client strategy.AiClient, query string, taskType string, limit int) ([]search.SearchResult, error) {
-	phrased, err := model.BuildQuery(query, taskType)
-	if err != nil {
-		return nil, err
-	}
-
-	vectors, err := client.Embed(ctx, []string{phrased})
-	if err != nil {
-		return nil, err
-	}
-	if len(vectors) != 1 {
-		return nil, fmt.Errorf("expected one query embedding, got %d", len(vectors))
-	}
-
-	hits, err := vectorStore.Search(ctx, vectors[0], limit)
-	if err != nil {
-		return nil, err
-	}
-	if len(hits) == 0 {
-		return nil, nil
-	}
-
-	metadata, err := store.ChunkMetadataByIDs(ctx, hitChunkIDs(hits))
-	if err != nil {
-		return nil, err
-	}
-
-	return buildSearchResults(hits, metadata), nil
-}
-
-// buildSearchResults resolves vector hits to their chunk metadata, preserving hit order and
-// skipping any hit whose metadata is missing.
-func buildSearchResults(hits []storage.VectorHit, metadata []storage.ChunkMetadata) []search.SearchResult {
-	byID := make(map[int64]storage.ChunkMetadata, len(metadata))
-	for _, item := range metadata {
-		byID[item.ChunkID] = item
-	}
-
-	results := make([]search.SearchResult, 0, len(hits))
-	for _, hit := range hits {
-		item, ok := byID[hit.ChunkID]
-		if !ok {
-			continue
-		}
-		results = append(results, search.SearchResult{
-			DocumentID: item.DocumentID,
-			ChunkID:    item.ChunkID,
-			Title:      item.Title,
-			Text:       item.Text,
 			Score:      hit.Distance,
 		})
 	}

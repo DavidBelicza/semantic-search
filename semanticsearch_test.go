@@ -98,15 +98,18 @@ func TestEngineIndexAndSearch(t *testing.T) {
 		t.Fatalf("index: %v", err)
 	}
 
-	results, err := engine.Search(ctx, "vacation", 5)
+	results, err := engine.Search(ctx, SearchConfig{Query: "vacation"})
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
 	if len(results) == 0 {
-		t.Fatal("expected at least one result")
+		t.Fatal("expected at least one document")
 	}
-	if results[0].Text == "" {
-		t.Fatal("result text should be populated")
+	if results[0].FileName != "notes.txt" {
+		t.Fatalf("document file name not resolved: %q", results[0].FileName)
+	}
+	if len(results[0].Chunks) == 0 || results[0].Chunks[0].Text == "" {
+		t.Fatal("document chunk text should be populated")
 	}
 }
 

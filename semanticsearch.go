@@ -32,14 +32,16 @@ import (
 // --- Engine ---
 
 // Config is the injected object graph for an Engine: the embedder, the two stores, and the
-// strategies. Each field is required. Every dependency is an interface, so a caller can supply
-// the built-in implementations (via the NewXxx constructors) or their own.
+// strategies. All are required except Searcher, which defaults to the built-in document searcher.
+// Every dependency is an interface, so a caller can supply the built-in implementations (via the
+// NewXxx constructors) or their own.
 type Config struct {
 	Model         strategy.EmbeddingModel
 	Embedder      strategy.AiClient
 	Storage       storage.Storage
 	VectorStorage storage.VectorStorage
 	Strategies    []StrategyFactory
+	Searcher      search.Searcher
 }
 
 // Engine is a configured index/search unit. Multiple engines with different embedders, stores,
@@ -50,6 +52,7 @@ type Engine struct {
 	store       storage.Storage
 	vectorStore storage.VectorStorage
 	factories   []StrategyFactory
+	searcher    search.Searcher
 }
 
 // NewEngine validates the config and composes the engine. It errors on a missing dependency or
@@ -60,12 +63,18 @@ func NewEngine(config Config) (*Engine, error) {
 		return nil, err
 	}
 
+	searcher := config.Searcher
+	if searcher == nil {
+		searcher = pipeline.NewDocumentSearcher(config.Storage, config.VectorStorage, config.Model, config.Embedder)
+	}
+
 	return &Engine{
 		model:       config.Model,
 		embedder:    config.Embedder,
 		store:       config.Storage,
 		vectorStore: config.VectorStorage,
 		factories:   config.Strategies,
+		searcher:    searcher,
 	}, nil
 }
 
@@ -93,24 +102,16 @@ func (e *Engine) Index(ctx context.Context, rootPath string, options IndexOption
 	return pipeline.Process(ctx, e.store, e.vectorStore, pool, options.FailFast)
 }
 
-// Search embeds the query and returns the nearest chunk matches in similarity order. An optional
-// task type tells the model how to phrase the query (see the Task* constants); omit it to use the
-// model's default retrieval task. Only the first value is used; passing a task type to a model
-// that does not support one returns an error.
-func (e *Engine) Search(ctx context.Context, query string, limit int, taskType ...string) ([]SearchResult, error) {
-	if limit <= 0 {
-		return nil, errors.New("limit must be greater than zero")
-	}
-	if strings.TrimSpace(query) == "" {
+// Search embeds the query and returns the matching documents, most relevant first, each carrying
+// the chunks that matched inside it. The config carries the query and its optional knobs
+// (MinRelevance, MaxDocuments, MaxChunks, TaskType); passing a task type to a model that does not
+// support one returns an error.
+func (e *Engine) Search(ctx context.Context, config SearchConfig) ([]DocumentResult, error) {
+	if strings.TrimSpace(config.Query) == "" {
 		return nil, errors.New("search query is required")
 	}
 
-	task := ""
-	if len(taskType) > 0 {
-		task = taskType[0]
-	}
-
-	return pipeline.Search(ctx, e.store, e.vectorStore, e.model, e.embedder, query, task, limit)
+	return e.searcher.Search(ctx, config)
 }
 
 // IndexOptions configures an index run.
@@ -131,6 +132,11 @@ type SearchConfig = search.SearchConfig
 // and text, and the score (vector distance from the query — lower is closer). It is defined
 // in core/search and re-exported here for a single-import public API.
 type SearchResult = search.SearchResult
+
+// DocumentResult is one document match: its id, file name and path, relevance score, and the
+// chunks that matched inside it, ranked best first. It is the type Search returns, defined in
+// core/search and re-exported here for a single-import public API.
+type DocumentResult = search.DocumentResult
 
 // --- Model ---
 
