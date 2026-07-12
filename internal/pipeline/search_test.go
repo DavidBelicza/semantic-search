@@ -15,8 +15,6 @@ func TestHitChunkIDs(t *testing.T) {
 	}
 }
 
-func intPtr(v int) *int { return &v }
-
 // ranked hits: doc 42 (0.1, 0.3), doc 7 (0.2), doc 9 (0.4). Best-first order.
 func sampleResults() []search.SearchResult {
 	return []search.SearchResult{
@@ -42,7 +40,7 @@ func TestGroupDocumentsRanksByBestChunk(t *testing.T) {
 }
 
 func TestGroupDocumentsCapsDocuments(t *testing.T) {
-	docs := groupDocuments(sampleResults(), search.SearchConfig{MaxDocuments: intPtr(2)})
+	docs := groupDocuments(sampleResults(), search.SearchConfig{MaxDocuments: 2})
 
 	if len(docs) != 2 {
 		t.Fatalf("expected 2 documents, got %d", len(docs))
@@ -53,7 +51,7 @@ func TestGroupDocumentsCapsDocuments(t *testing.T) {
 }
 
 func TestGroupDocumentsCapsChunksPerDocument(t *testing.T) {
-	docs := groupDocuments(sampleResults(), search.SearchConfig{MaxChunks: intPtr(1)})
+	docs := groupDocuments(sampleResults(), search.SearchConfig{MaxChunks: 1})
 
 	if len(docs[0].Chunks) != 1 || docs[0].Chunks[0].ChunkID != 1 {
 		t.Fatalf("expected only the top chunk of document 42, got %#v", docs[0].Chunks)
@@ -148,7 +146,7 @@ func TestDocumentSearcherGroupsAndHydratesSurvivorsOnly(t *testing.T) {
 	}}
 
 	searcher := NewDocumentSearcher(store, vectors, fakeModel{}, fakeClient{})
-	docs, err := searcher.Search(context.Background(), search.SearchConfig{Query: "q", MaxChunks: intPtr(1)})
+	docs, err := searcher.Search(context.Background(), search.SearchConfig{Query: "q", MaxChunks: 1})
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}

@@ -14,11 +14,9 @@ const (
 	// maxSearchChunks is the fixed number of top-ranked chunks the vector search returns before
 	// grouping into documents.
 	maxSearchChunks = 1000
-	// defaultMinRelevance, defaultMaxDocuments, and defaultMaxChunks apply when the caller leaves
-	// them unset in the config.
-	defaultMinRelevance = 0.2
+	// defaultMaxDocuments and defaultMaxChunks apply when the caller leaves them zero in the config.
 	defaultMaxDocuments = 20
-	defaultMaxChunks    = 2
+	defaultMaxChunks    = 3
 )
 
 // SearchStore is the metadata surface search needs — a subset of storage.Storage, which any
@@ -77,18 +75,9 @@ func (s documentSearcher) Search(ctx context.Context, config search.SearchConfig
 		return nil, err
 	}
 
-	docs := groupDocuments(filterByRelevance(results, resolveMinRelevance(config)), config)
+	docs := groupDocuments(filterByRelevance(results, config.MinRelevance), config)
 
 	return s.hydrate(ctx, docs)
-}
-
-// resolveMinRelevance returns the minimum relevance, defaulting when the caller left it unset.
-func resolveMinRelevance(config search.SearchConfig) float64 {
-	if config.MinRelevance == nil {
-		return defaultMinRelevance
-	}
-
-	return *config.MinRelevance
 }
 
 // filterByRelevance keeps only matches at least as relevant as min. Results are ordered by
@@ -211,22 +200,22 @@ func groupDocuments(results []search.SearchResult, config search.SearchConfig) [
 	return capDocuments(docs, resolveMaxDocuments(config))
 }
 
-// resolveMaxDocuments returns the document cap, defaulting when the caller left it unset.
+// resolveMaxDocuments returns the document cap, defaulting when the caller left it zero.
 func resolveMaxDocuments(config search.SearchConfig) int {
-	if config.MaxDocuments == nil {
+	if config.MaxDocuments == 0 {
 		return defaultMaxDocuments
 	}
 
-	return *config.MaxDocuments
+	return config.MaxDocuments
 }
 
-// resolveMaxChunks returns the per-document chunk cap, defaulting when the caller left it unset.
+// resolveMaxChunks returns the per-document chunk cap, defaulting when the caller left it zero.
 func resolveMaxChunks(config search.SearchConfig) int {
-	if config.MaxChunks == nil {
+	if config.MaxChunks == 0 {
 		return defaultMaxChunks
 	}
 
-	return *config.MaxChunks
+	return config.MaxChunks
 }
 
 // capChunksPerDocument trims each document's chunks to the top max, keeping the highest ranked.

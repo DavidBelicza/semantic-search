@@ -18,12 +18,12 @@ type SearchConfig struct {
 	// TaskType selects the model's query task; empty uses the model's default retrieval task.
 	TaskType string
 	// MinRelevance is the minimum required relevance (0 to 1). Higher means more relevant results
-	// but a shorter list. Nil uses the default (0.2); set 0 to disable.
-	MinRelevance *float64
-	// MaxDocuments caps how many top-ranked documents the search returns. Nil uses the default (20).
-	MaxDocuments *int
-	// MaxChunks caps how many top-ranked chunks each returned document keeps. Nil uses the default (2).
-	MaxChunks *int
+	// but a shorter list. Zero keeps everything.
+	MinRelevance float64
+	// MaxDocuments caps how many top-ranked documents the search returns. Zero uses the default (20).
+	MaxDocuments int
+	// MaxChunks caps how many top-ranked chunks each returned document keeps. Zero uses the default (3).
+	MaxChunks int
 }
 
 // SearchResult is one match: the chunk's identity and text plus its distance score.

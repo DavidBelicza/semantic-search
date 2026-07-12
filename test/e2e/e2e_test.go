@@ -115,9 +115,8 @@ func assertRetrieval(t *testing.T, engine *semanticsearch.Engine, dir string) {
 		{"working remotely from home policy", "remote"},              // → handbook.docx
 	}
 
-	noRelevanceFilter := 0.0
 	for _, tc := range cases {
-		results, err := engine.Search(ctx, semanticsearch.SearchConfig{Query: tc.query, MinRelevance: &noRelevanceFilter})
+		results, err := engine.Search(ctx, semanticsearch.SearchConfig{Query: tc.query})
 		if err != nil {
 			t.Fatalf("search %q: %v", tc.query, err)
 		}

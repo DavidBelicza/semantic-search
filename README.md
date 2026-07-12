@@ -31,6 +31,7 @@
   - [Scaling up with HNSW](#scaling-up-with-hnsw)
   - [Choosing an embedder model](#choosing-an-embedder-model)
   - [Optimizing search with tasks](#optimizing-search-with-tasks)
+  - [Other search configurations](#other-search-configurations)
   - [Custom AI client](#custom-ai-client)
 - [Documents](#documents)
 - [License](#license)
@@ -208,12 +209,12 @@ func main() {
 	}
 
 	// Search the indexed content. The query is embedded the same way, and
-	// the engine returns the chunks whose meaning is closest to it, so
-	// results are matched by meaning rather than exact keywords.
-	results, _ := engine.Search(ctx, "how do I detect security threats in logs", 5)
-	for _, r := range results {
-		fmt.Printf("%s  (score %.4f)\n%s\n", r.Title, r.Score, r.Text)
-	}
+	// the engine returns the documents whose meaning is closest to it, each
+	// carrying the chunks that matched inside it, so results are matched by
+	// meaning rather than exact keywords.
+	docs, _ := engine.Search(ctx, semanticsearch.SearchConfig{
+		Query: "how do I detect security threats in logs",
+	})
 }
 ```
 
@@ -300,13 +301,16 @@ Models can search differently depending on the task, and the available tasks dep
 ```go
 semanticsearch.NewModel(semanticsearch.Gemma300mQAT)
 ...
-engine.Search(ctx, "I want a spicy tea", 5)
+engine.Search(ctx, semanticsearch.SearchConfig{Query: "I want a spicy tea"})
 ```
 
 ```go
 semanticsearch.NewModel(semanticsearch.Gemma300mQAT)
 ...
-engine.Search(ctx, "I want a spicy tea", 5, semanticsearch.TaskGemma.Classification)
+engine.Search(ctx, semanticsearch.SearchConfig{
+	Query:    "I want a spicy tea",
+	TaskType: semanticsearch.TaskGemma.Classification,
+})
 ```
 
 Gemma has 7 tasks. Other models instead take free text as the task. For example:
@@ -314,7 +318,24 @@ Gemma has 7 tasks. Other models instead take free text as the task. For example:
 ```go
 semanticsearch.NewModel(semanticsearch.Qwen30_6B1024)
 ...
-engine.Search(ctx, "I want a spicy tea", 5, "Find the most exclusive product for this query")
+engine.Search(ctx, semanticsearch.SearchConfig{
+	Query:    "I want a spicy tea",
+	TaskType: "Find the most exclusive product for this query",
+})
+```
+
+### Other search configurations
+
+The search config also bounds the results: `MinRelevance` drops weak matches, `MaxDocuments` caps how many documents come back, and `MaxChunks` caps the chunks kept per document.
+
+```go
+engine.Search(ctx, semanticsearch.SearchConfig{
+	Query:        "I want a spicy tea",
+	TaskType:     semanticsearch.TaskGemma.QuestionAnswering,
+	MinRelevance: 0.3,
+	MaxDocuments: 10,
+	MaxChunks:    3,
+})
 ```
 
 ### Custom AI client
