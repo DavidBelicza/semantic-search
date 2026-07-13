@@ -304,6 +304,54 @@ LIMIT ?`, status, afterID, limit)
 	return documents, nil
 }
 
+// DocumentsFromID pages through all documents by id, returning their id and absolute path. Other
+// Document fields are left zero; this is the enumeration used by the cleanup pipeline.
+func (s *Store) DocumentsFromID(ctx context.Context, fromID int64, limit int) ([]storage.Document, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, absolute_path
+FROM documents
+WHERE id > ?
+ORDER BY id
+LIMIT ?`, fromID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var documents []storage.Document
+	for rows.Next() {
+		var document storage.Document
+		if err := rows.Scan(&document.ID, &document.AbsolutePath); err != nil {
+			return nil, err
+		}
+		documents = append(documents, document)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return documents, nil
+}
+
+// DeleteDocument removes a document and its chunks in one transaction. The caller deletes the
+// vectors first, so a crash cannot strand a document whose vectors are already gone.
+func (s *Store) DeleteDocument(ctx context.Context, documentID int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, "DELETE FROM chunks WHERE document_id = ?", documentID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM documents WHERE id = ?", documentID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
 func (s *Store) UpdateDocumentContentHashAndStatus(ctx context.Context, fileID string, contentHash string, status string) error {
 	query := `
 UPDATE documents

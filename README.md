@@ -34,6 +34,7 @@
   - [Optimizing search with tasks](#optimizing-search-with-tasks)
   - [Other search configurations](#other-search-configurations)
   - [Custom AI client](#custom-ai-client)
+  - [Delta configurations](#delta-configurations)
 - [Documents](#documents)
 - [License](#license)
 
@@ -380,6 +381,20 @@ func (c myClient) Embed(ctx context.Context, texts []string) ([][]float32, error
 
 // Inject it like any other client:
 // semanticsearch.NewEngine(semanticsearch.Config{ Embedder: myClient{}, ... })
+```
+
+### Delta configurations
+
+By default, re-indexing removes documents whose files were deleted from disk, along with their chunks and vectors.
+
+```go
+engine.Index(ctx, "path/to/files", semanticsearch.IndexOptions{})
+```
+
+Set `KeepMissingFiles` to keep those documents in the index even after their files are gone.
+
+```go
+engine.Index(ctx, "path/to/files", semanticsearch.IndexOptions{KeepMissingFiles: true})
 ```
 
 ## Documents
