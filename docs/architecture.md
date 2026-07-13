@@ -79,13 +79,16 @@ strategies; `Pool.For(path)` returns the first that claims a file.
 
 ## Pipelines — the flow between files
 
-Two functions in `internal/pipeline`; they own iteration, database writes, and the status
+Three functions in `internal/pipeline`; they own iteration, database writes, and the status
 decisions that advance or stop the flow.
 
 - **Index** — walk the tree, ask the pool which strategy claims each file, register the
   claimed ones, then fingerprint the indexed documents to detect content changes.
 - **Process** — for each scanned document, read the bytes and run `Parse → Chunk → Embed`;
   between those it reconciles chunks, writes vectors, and updates status.
+- **Cleanup** — page through the stored documents and remove those whose file no longer exists
+  (with their chunks and vectors). It runs after indexing, when the walk has refreshed the paths,
+  so a moved file is not mistaken for a deleted one; it is skipped when `KeepMissingFiles` is set.
 
 Document status machine: `indexed → scanned → chunked → embedded`. Unchanged files are
 short-circuited (fingerprint match) so they are never re-chunked or re-embedded.

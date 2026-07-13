@@ -113,6 +113,79 @@ func TestEngineIndexAndSearch(t *testing.T) {
 	}
 }
 
+func TestEngineIndexPrunesMissingFilesByDefault(t *testing.T) {
+	dir := t.TempDir()
+	keep := filepath.Join(dir, "keep.txt")
+	remove := filepath.Join(dir, "remove.txt")
+	if err := os.WriteFile(keep, []byte("The vacation policy grants fifteen paid days."), 0o644); err != nil {
+		t.Fatalf("write keep: %v", err)
+	}
+	if err := os.WriteFile(remove, []byte("The office is closed on public holidays."), 0o644); err != nil {
+		t.Fatalf("write remove: %v", err)
+	}
+
+	engine := newTestEngine(t, NewTextStrategy())
+	ctx := context.Background()
+
+	if err := engine.Index(ctx, dir, IndexOptions{}); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+	if got := documentNames(t, engine); len(got) != 2 {
+		t.Fatalf("expected 2 documents indexed, got %v", got)
+	}
+
+	if err := os.Remove(remove); err != nil {
+		t.Fatalf("remove file: %v", err)
+	}
+
+	// Default re-index prunes the deleted file.
+	if err := engine.Index(ctx, dir, IndexOptions{}); err != nil {
+		t.Fatalf("reindex: %v", err)
+	}
+	if names := documentNames(t, engine); len(names) != 1 || names[0] != "keep.txt" {
+		t.Fatalf("expected only keep.txt after default prune, got %v", names)
+	}
+}
+
+func TestEngineKeepMissingFilesRetainsDeleted(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("The vacation policy grants fifteen paid days."), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	engine := newTestEngine(t, NewTextStrategy())
+	ctx := context.Background()
+
+	if err := engine.Index(ctx, dir, IndexOptions{}); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+	if err := os.Remove(filepath.Join(dir, "a.txt")); err != nil {
+		t.Fatalf("remove file: %v", err)
+	}
+
+	// KeepMissingFiles skips the prune, so the deleted file's document survives.
+	if err := engine.Index(ctx, dir, IndexOptions{KeepMissingFiles: true}); err != nil {
+		t.Fatalf("reindex: %v", err)
+	}
+	if names := documentNames(t, engine); len(names) != 1 {
+		t.Fatalf("expected the deleted file's document retained, got %v", names)
+	}
+}
+
+// documentNames returns the file names of every document a broad search surfaces.
+func documentNames(t *testing.T, engine *Engine) []string {
+	t.Helper()
+	results, err := engine.Search(context.Background(), SearchConfig{Query: "policy office vacation holidays"})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	names := make([]string, 0, len(results))
+	for _, doc := range results {
+		names = append(names, doc.FileName)
+	}
+	return names
+}
+
 // --- Embedder ---
 
 func TestNewAiEmbedderOpenAI(t *testing.T) {

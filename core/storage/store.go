@@ -20,6 +20,8 @@ type Storage interface {
 	ChunkMetadataByIDs(ctx context.Context, chunkIDs []int64) ([]ChunkMetadata, error)
 	ChunkDocumentIDs(ctx context.Context, chunkIDs []int64) ([]ChunkDocument, error)
 	DocumentsByIDs(ctx context.Context, documentIDs []int64) ([]Document, error)
+	DocumentsFromID(ctx context.Context, fromID int64, limit int) ([]Document, error)
+	DeleteDocument(ctx context.Context, documentID int64) error
 }
 
 // VectorHit is one nearest-neighbor result: a chunk id and its distance to the query

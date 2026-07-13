@@ -79,9 +79,9 @@ func NewEngine(config Config) (*Engine, error) {
 }
 
 // Index runs the two pipelines: discover → register → fingerprint, then read → parse → chunk →
-// embed. Re-running is incremental: unchanged files are not re-embedded. The strategies (and
-// any resources they open, like the PDF extractor) are built here and released when indexing
-// finishes.
+// embed. Re-running is incremental: unchanged files are not re-embedded. Documents whose files
+// are gone are pruned unless IndexOptions.KeepMissingFiles is set. The strategies (and any
+// resources they open, like the PDF extractor) are built here and released when indexing finishes.
 func (e *Engine) Index(ctx context.Context, rootPath string, options IndexOptions) error {
 	strategies, release, err := buildStrategies(e.factories, e.model, e.embedder)
 	if err != nil {
@@ -99,7 +99,15 @@ func (e *Engine) Index(ctx context.Context, rootPath string, options IndexOption
 		return err
 	}
 
-	return pipeline.Process(ctx, e.store, e.vectorStore, pool, options.FailFast)
+	if err := pipeline.Process(ctx, e.store, e.vectorStore, pool, options.FailFast); err != nil {
+		return err
+	}
+
+	if options.KeepMissingFiles {
+		return nil
+	}
+
+	return pipeline.Cleanup(ctx, e.store, e.vectorStore, options.FailFast)
 }
 
 // Search embeds the query and returns the matching documents, most relevant first, each carrying
@@ -122,6 +130,9 @@ type IndexOptions struct {
 	IncludeHidden bool
 	// FollowSymlinks resolves and indexes symlink targets.
 	FollowSymlinks bool
+	// KeepMissingFiles keeps documents whose files no longer exist on disk. By default indexing
+	// removes them, along with their chunks and vectors.
+	KeepMissingFiles bool
 }
 
 // SearchConfig is the whole input to a search: the query and its optional knobs. It is defined

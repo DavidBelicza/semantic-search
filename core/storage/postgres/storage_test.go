@@ -87,3 +87,40 @@ func TestPostgresUpdateMissingDocumentErrors(t *testing.T) {
 		t.Fatal("expected error updating a missing document")
 	}
 }
+
+func TestPostgresDocumentsFromIDAndDelete(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+
+	if err := store.UpsertDocuments(ctx, []storage.FileMetadata{
+		{FileID: "f1", AbsolutePath: "/a.txt", SizeBytes: 1, ModifiedAtNS: 1},
+		{FileID: "f2", AbsolutePath: "/b.txt", SizeBytes: 1, ModifiedAtNS: 1},
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	all, err := store.DocumentsFromID(ctx, 0, 10)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("documents from id: %v %+v", err, all)
+	}
+
+	target := all[0]
+	if _, err := store.ApplyDocumentChunkReconcile(ctx, target.ID, storage.ChunkReconcilePlan{
+		Insert: []storage.Chunk{{ChunkIndex: 0, Title: "Intro", Text: "hi", TokenCount: 1, ContentHash: "h1"}},
+	}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	if err := store.DeleteDocument(ctx, target.ID); err != nil {
+		t.Fatalf("delete document: %v", err)
+	}
+
+	remaining, err := store.DocumentsFromID(ctx, 0, 10)
+	if err != nil || len(remaining) != 1 || remaining[0].ID == target.ID {
+		t.Fatalf("expected the target document removed, got %v %+v", err, remaining)
+	}
+	chunks, err := store.ChunksByDocumentID(ctx, target.ID)
+	if err != nil || len(chunks) != 0 {
+		t.Fatalf("expected the document's chunks removed, got %v %+v", err, chunks)
+	}
+}
