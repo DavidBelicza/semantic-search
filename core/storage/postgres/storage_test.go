@@ -124,3 +124,44 @@ func TestPostgresDocumentsFromIDAndDelete(t *testing.T) {
 		t.Fatalf("expected the document's chunks removed, got %v %+v", err, chunks)
 	}
 }
+
+func TestPostgresChunkLookups(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+
+	if err := store.UpsertDocuments(ctx, []storage.FileMetadata{
+		{FileID: "f1", AbsolutePath: "/a.txt", SizeBytes: 1, ModifiedAtNS: 1},
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	docs, err := store.DocumentsByStatus(ctx, "indexed", 0, 10)
+	if err != nil || len(docs) != 1 {
+		t.Fatalf("by status: %v %+v", err, docs)
+	}
+	docID := docs[0].ID
+
+	inserted, err := store.ApplyDocumentChunkReconcile(ctx, docID, storage.ChunkReconcilePlan{
+		Insert: []storage.Chunk{{ChunkIndex: 0, Title: "Intro", Text: "hi", ContentHash: "h1"}},
+	})
+	if err != nil || len(inserted) != 1 {
+		t.Fatalf("reconcile: %v %+v", err, inserted)
+	}
+	chunkID := inserted[0].ID
+
+	mapping, err := store.ChunkDocumentIDs(ctx, []int64{chunkID})
+	if err != nil || len(mapping) != 1 || mapping[0].DocumentID != docID {
+		t.Fatalf("chunk document ids: %v %+v", err, mapping)
+	}
+	byIDs, err := store.DocumentsByIDs(ctx, []int64{docID})
+	if err != nil || len(byIDs) != 1 || byIDs[0].AbsolutePath != "/a.txt" {
+		t.Fatalf("documents by ids: %v %+v", err, byIDs)
+	}
+
+	// Empty inputs hit the early-return guards.
+	if m, err := store.ChunkDocumentIDs(ctx, nil); err != nil || len(m) != 0 {
+		t.Fatalf("empty mapping: %v %+v", err, m)
+	}
+	if d, err := store.DocumentsByIDs(ctx, nil); err != nil || len(d) != 0 {
+		t.Fatalf("empty documents: %v %+v", err, d)
+	}
+}

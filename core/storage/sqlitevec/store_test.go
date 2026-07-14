@@ -103,3 +103,40 @@ func TestSearchRejectsDimensionMismatch(t *testing.T) {
 		t.Fatal("expected dimension mismatch error")
 	}
 }
+
+func TestOpenRejectsBadDimensions(t *testing.T) {
+	if _, err := Open(context.Background(), filepath.Join(t.TempDir(), "v.db"), 0); err == nil {
+		t.Fatal("expected an error for zero dimensions")
+	}
+}
+
+func TestReplaceAndDeleteEmptyAreNoops(t *testing.T) {
+	store := openTestStore(t)
+	defer store.Close()
+	if err := store.Replace(context.Background(), nil); err != nil {
+		t.Fatalf("empty replace: %v", err)
+	}
+	if err := store.Delete(context.Background(), nil); err != nil {
+		t.Fatalf("empty delete: %v", err)
+	}
+}
+
+func TestReplaceValidatesEmbeddings(t *testing.T) {
+	store := openTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+	if err := store.Replace(ctx, []storage.ChunkEmbedding{{ChunkID: 0, Vector: []float32{1, 0, 0}}}); err == nil {
+		t.Fatal("expected an error for a zero chunk id")
+	}
+	if err := store.Replace(ctx, []storage.ChunkEmbedding{{ChunkID: 1, Vector: []float32{1, 0}}}); err == nil {
+		t.Fatal("expected a dimension mismatch error")
+	}
+}
+
+func TestReplaceHandlesZeroVector(t *testing.T) {
+	store := openTestStore(t)
+	defer store.Close()
+	if err := store.Replace(context.Background(), []storage.ChunkEmbedding{{ChunkID: 1, Vector: []float32{0, 0, 0}}}); err != nil {
+		t.Fatalf("zero vector replace: %v", err)
+	}
+}

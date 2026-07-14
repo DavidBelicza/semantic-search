@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/davidbelicza/semantic-search/core/strategy"
 )
@@ -237,4 +238,98 @@ func TestNewSQLiteVectorStorageOpens(t *testing.T) {
 		t.Fatalf("open sqlite-vec storage: %v", err)
 	}
 	defer store.Close()
+}
+
+func TestNewModelPredefinedConstants(t *testing.T) {
+	for _, id := range []PredefinedModel{Gemma300mQAT, Nomic768, E5Large1024, BGELarge1024, Qwen30_6B1024, MxbaiLarge1024} {
+		m := NewModel(id)
+		if m == nil || m.Name() == "" || m.Dimensions() <= 0 {
+			t.Fatalf("predefined model %q not configured", id)
+		}
+	}
+}
+
+func TestStrategyFactoriesBuild(t *testing.T) {
+	model := NewModel(Gemma300mQAT)
+	embedder := fixedEmbedder{}
+
+	factories := []StrategyFactory{
+		NewMarkdownStrategy(),
+		NewPDFStrategy(),
+		NewCodeStrategy(),
+		NewDocxStrategy(),
+		NewTextStrategy(),
+	}
+	for _, factory := range factories {
+		if len(factory.Extensions) == 0 || factory.Build == nil {
+			t.Fatalf("factory not initialized: %#v", factory.Extensions)
+		}
+		strat, release, err := factory.Build(model, embedder)
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		if strat == nil {
+			t.Fatal("build returned a nil strategy")
+		}
+		if release != nil {
+			_ = release()
+		}
+	}
+}
+
+func TestValidateConfigRequiresEachDependency(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, _ := NewSQLiteStorage(ctx, filepath.Join(dir, "a.db"))
+	defer store.Close()
+	vectors, _ := NewSQLiteVectorStorage(ctx, filepath.Join(dir, "b.db"), 8)
+	defer vectors.Close()
+
+	full := Config{
+		Model:         NewModel(Gemma300mQAT),
+		Embedder:      fixedEmbedder{},
+		Storage:       store,
+		VectorStorage: vectors,
+		Strategies:    []StrategyFactory{NewTextStrategy()},
+	}
+
+	cases := map[string]func(Config) Config{
+		"model":         func(c Config) Config { c.Model = nil; return c },
+		"embedder":      func(c Config) Config { c.Embedder = nil; return c },
+		"storage":       func(c Config) Config { c.Storage = nil; return c },
+		"vectorStorage": func(c Config) Config { c.VectorStorage = nil; return c },
+		"strategies":    func(c Config) Config { c.Strategies = nil; return c },
+	}
+	for name, mutate := range cases {
+		if _, err := NewEngine(mutate(full)); err == nil {
+			t.Fatalf("expected an error when %s is missing", name)
+		}
+	}
+
+	if _, err := NewEngine(full); err != nil {
+		t.Fatalf("the full config should be valid: %v", err)
+	}
+}
+
+func TestNewSQLiteStorageErrorsOnBadPath(t *testing.T) {
+	if _, err := NewSQLiteStorage(context.Background(), "/no/such/dir/index.db"); err == nil {
+		t.Fatal("expected an error for an unwritable path")
+	}
+}
+
+func TestNewSQLiteVectorStorageErrorsOnBadDimensions(t *testing.T) {
+	if _, err := NewSQLiteVectorStorage(context.Background(), filepath.Join(t.TempDir(), "v.db"), 0); err == nil {
+		t.Fatal("expected an error for zero dimensions")
+	}
+}
+
+func TestNewAiEmbedderWithTimeout(t *testing.T) {
+	e := NewAiEmbedder(AiEmbedderConfig{
+		Standard: StandardOpenAI,
+		BaseURL:  "http://127.0.0.1:1234",
+		Timeout:  time.Second,
+	}, NewModel(Gemma300mQAT))
+	if e == nil {
+		t.Fatal("expected an embedder")
+	}
 }

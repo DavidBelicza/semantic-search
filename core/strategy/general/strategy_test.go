@@ -116,3 +116,26 @@ func TestGeneralStrategyEmbedFormatsAndDelegates(t *testing.T) {
 		t.Fatalf("embed input not formatted: %#v", fake.inputs)
 	}
 }
+
+func TestFileTitleFromPath(t *testing.T) {
+	cases := map[string]string{
+		"/a/b/notes.md": "notes",
+		"report.pdf":    "report",
+		"noext":         "noext",
+		"":              "",
+	}
+	for in, want := range cases {
+		if got := FileTitleFromPath(in); got != want {
+			t.Fatalf("FileTitleFromPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSectionTitleJoinsPathOrFallsBack(t *testing.T) {
+	if got := sectionTitle([]string{"Guide", "Payments"}, "file"); got != "Guide > Payments" {
+		t.Fatalf("joined path mismatch: %q", got)
+	}
+	if got := sectionTitle(nil, "file"); got != "file" {
+		t.Fatalf("fallback mismatch: %q", got)
+	}
+}

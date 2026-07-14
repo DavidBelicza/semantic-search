@@ -484,3 +484,69 @@ func openTestStore(t *testing.T) *Store {
 
 	return store
 }
+
+func TestSearchAndCleanupQueries(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	defer store.Close()
+	if err := store.EnsureSchema(ctx); err != nil {
+		t.Fatalf("ensure schema: %v", err)
+	}
+
+	file := storage.FileMetadata{FileID: "1:1", AbsolutePath: "/tmp/a.md", SizeBytes: 1, ModifiedAtNS: 1}
+	if err := store.UpsertDocuments(ctx, []storage.FileMetadata{file}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	docs, err := store.DocumentsByStatus(ctx, storage.DocumentStatusIndexed, 0, 1)
+	if err != nil || len(docs) != 1 {
+		t.Fatalf("by status: %v %+v", err, docs)
+	}
+	docID := docs[0].ID
+
+	inserted, err := store.ApplyDocumentChunkReconcile(ctx, docID, storage.ReconcileChunks(nil, []storage.Chunk{
+		{ChunkIndex: 0, Title: "Intro", Text: "hello", ContentHash: "h1"},
+		{ChunkIndex: 1, Title: "Body", Text: "world", ContentHash: "h2"},
+	}))
+	if err != nil || len(inserted) != 2 {
+		t.Fatalf("reconcile: %v %+v", err, inserted)
+	}
+	ids := []int64{inserted[0].ID, inserted[1].ID}
+
+	meta, err := store.ChunkMetadataByIDs(ctx, ids)
+	if err != nil || len(meta) != 2 {
+		t.Fatalf("chunk metadata: %v %+v", err, meta)
+	}
+	mapping, err := store.ChunkDocumentIDs(ctx, ids)
+	if err != nil || len(mapping) != 2 || mapping[0].DocumentID != docID {
+		t.Fatalf("chunk document ids: %v %+v", err, mapping)
+	}
+	byIDs, err := store.DocumentsByIDs(ctx, []int64{docID})
+	if err != nil || len(byIDs) != 1 || byIDs[0].AbsolutePath == "" {
+		t.Fatalf("documents by ids: %v %+v", err, byIDs)
+	}
+	all, err := store.DocumentsFromID(ctx, 0, 10)
+	if err != nil || len(all) != 1 {
+		t.Fatalf("documents from id: %v %+v", err, all)
+	}
+
+	// Empty inputs hit the early-return guards.
+	if m, err := store.ChunkMetadataByIDs(ctx, nil); err != nil || len(m) != 0 {
+		t.Fatalf("empty metadata: %v %+v", err, m)
+	}
+	if m, err := store.ChunkDocumentIDs(ctx, nil); err != nil || len(m) != 0 {
+		t.Fatalf("empty mapping: %v %+v", err, m)
+	}
+	if d, err := store.DocumentsByIDs(ctx, nil); err != nil || len(d) != 0 {
+		t.Fatalf("empty documents: %v %+v", err, d)
+	}
+
+	if err := store.DeleteDocument(ctx, docID); err != nil {
+		t.Fatalf("delete document: %v", err)
+	}
+	if remaining, err := store.DocumentsFromID(ctx, 0, 10); err != nil || len(remaining) != 0 {
+		t.Fatalf("expected no documents after delete: %v %+v", err, remaining)
+	}
+	if left, err := store.ChunksByDocumentID(ctx, docID); err != nil || len(left) != 0 {
+		t.Fatalf("expected chunks removed: %v %+v", err, left)
+	}
+}
