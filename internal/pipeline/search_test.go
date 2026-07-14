@@ -226,3 +226,67 @@ func TestDocumentSearcherNoHitsReturnsEmpty(t *testing.T) {
 		t.Fatalf("expected no results, got %v %#v", err, docs)
 	}
 }
+
+type errHydrateChunksStore struct{ *fakeSearchStore }
+
+func (errHydrateChunksStore) ChunkMetadataByIDs(context.Context, []int64) ([]storage.ChunkMetadata, error) {
+	return nil, errors.New("meta")
+}
+
+type errHydratePathsStore struct{ *fakeSearchStore }
+
+func (errHydratePathsStore) DocumentsByIDs(context.Context, []int64) ([]storage.Document, error) {
+	return nil, errors.New("paths")
+}
+
+func TestDocumentSearcherHydrationErrors(t *testing.T) {
+	base := func() *fakeSearchStore {
+		return &fakeSearchStore{
+			docByChunk: map[int64]int64{1: 42},
+			meta:       map[int64]storage.ChunkMetadata{1: {ChunkID: 1, Text: "a"}},
+			paths:      map[int64]string{42: "/x.md"},
+		}
+	}
+	hits := fakeVectorStore{hits: []storage.VectorHit{{ChunkID: 1, Distance: 0.1}}}
+	cfg := search.SearchConfig{Query: "q"}
+
+	if _, err := NewDocumentSearcher(errHydrateChunksStore{base()}, hits, fakeModel{}, fakeClient{}).Search(context.Background(), cfg); err == nil {
+		t.Fatal("expected a hydrate-chunks error")
+	}
+	if _, err := NewDocumentSearcher(errHydratePathsStore{base()}, hits, fakeModel{}, fakeClient{}).Search(context.Background(), cfg); err == nil {
+		t.Fatal("expected a hydrate-paths error")
+	}
+}
+
+type partialMappingStore struct{ *fakeSearchStore }
+
+// ChunkDocumentIDs returns a mapping only for chunk 1, so chunk 2 is an orphan hit that
+// buildRankedResults must skip.
+func (partialMappingStore) ChunkDocumentIDs(_ context.Context, ids []int64) ([]storage.ChunkDocument, error) {
+	var out []storage.ChunkDocument
+	for _, id := range ids {
+		if id == 1 {
+			out = append(out, storage.ChunkDocument{ChunkID: 1, DocumentID: 42})
+		}
+	}
+	return out, nil
+}
+
+func TestDocumentSearcherSkipsUnmappedHitsAndMissingMetadata(t *testing.T) {
+	store := partialMappingStore{&fakeSearchStore{
+		meta:  map[int64]storage.ChunkMetadata{},
+		paths: map[int64]string{42: "/x.md"},
+	}}
+	hits := fakeVectorStore{hits: []storage.VectorHit{{ChunkID: 1, Distance: 0.1}, {ChunkID: 2, Distance: 0.2}}}
+
+	docs, err := NewDocumentSearcher(store, hits, fakeModel{}, fakeClient{}).Search(context.Background(), search.SearchConfig{Query: "q"})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(docs) != 1 || docs[0].DocumentID != 42 {
+		t.Fatalf("expected only document 42, got %#v", docs)
+	}
+	if docs[0].Chunks[0].Text != "" {
+		t.Fatalf("expected empty text for missing metadata, got %q", docs[0].Chunks[0].Text)
+	}
+}

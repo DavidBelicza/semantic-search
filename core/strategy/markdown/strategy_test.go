@@ -131,3 +131,11 @@ func TestMarkdownStrategyChunkSplitsOversizedFence(t *testing.T) {
 		t.Fatalf("expected the oversized fence split into multiple chunks, got %d", len(chunks))
 	}
 }
+
+func TestMarkdownParseEdgeWhitespace(t *testing.T) {
+	// Leading blanks (blank preamble), an empty heading, and consecutive blank lines in a body.
+	src := "\n\n#\n\nBody line one.\n\n\nBody line two.\n"
+	if _, err := newMarkdown().Parse([]byte(src)); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+}

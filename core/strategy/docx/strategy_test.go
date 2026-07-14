@@ -215,3 +215,22 @@ func TestParseRejectsMissingDocumentPart(t *testing.T) {
 		t.Fatal("expected an error when word/document.xml is missing")
 	}
 }
+
+func TestParseHandlesTabsBlanksAndConsecutiveBodies(t *testing.T) {
+	// Newlines between elements exercise chars() while not capturing; <w:tab/> exercises the tab
+	// case; an empty heading and empty body hit the early returns; two bodies in a row hit the
+	// append branch; a non-numeric outlineLvl exercises the atoiOr fallback.
+	body := para("Heading1", "") +
+		para("", "") +
+		`<w:p><w:pPr><w:outlineLvl w:val="notanumber"/></w:pPr><w:r><w:t>First</w:t><w:tab/><w:t>line</w:t></w:r></w:p>` +
+		para("", "Second body paragraph.")
+	doc := "<w:document " + wNS + ">\n  <w:body>\n    " + body + "\n  </w:body>\n</w:document>"
+
+	parsed, err := newDocx().Parse(makeDocx(t, doc, headingStyles()))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(parsed.Sections) == 0 {
+		t.Fatalf("expected at least one section, got %#v", parsed.Sections)
+	}
+}

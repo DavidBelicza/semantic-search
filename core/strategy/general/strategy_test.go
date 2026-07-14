@@ -139,3 +139,20 @@ func TestSectionTitleJoinsPathOrFallsBack(t *testing.T) {
 		t.Fatalf("fallback mismatch: %q", got)
 	}
 }
+
+func TestChunkSectionsClampsBodyBudgetForLongTitle(t *testing.T) {
+	longTitle := strings.Repeat("word ", 200) // title tokens exceed MaxTokens
+	chunks := ChunkSections(
+		[]strategy.Section{{Body: "some body text to place into a chunk"}},
+		SectionChunkConfig{
+			MaxTokens:          10,
+			AverageTokenLength: 4,
+			FallbackTitle:      longTitle,
+			SplitIntoParts:     func(b string) []string { return []string{b} },
+			SplitOversized:     func(p string, _ int) []string { return []string{p} },
+		},
+	)
+	if len(chunks) == 0 {
+		t.Fatal("expected at least one chunk even with a long title")
+	}
+}

@@ -367,3 +367,17 @@ func TestEngineIndexPropagatesStrategyBuildError(t *testing.T) {
 		t.Fatal("expected the strategy build error to propagate")
 	}
 }
+
+func TestEngineSearchRejectsEmptyQuery(t *testing.T) {
+	engine := newTestEngine(t, NewTextStrategy())
+	if _, err := engine.Search(context.Background(), SearchConfig{Query: "   "}); err == nil {
+		t.Fatal("expected an error for a blank query")
+	}
+}
+
+func TestNewModelUnlistedWithDimensions(t *testing.T) {
+	m := NewModel("some-custom-model", 512)
+	if m.Name() != "some-custom-model" || m.Dimensions() != 512 {
+		t.Fatalf("unlisted model not configured: name=%q dims=%d", m.Name(), m.Dimensions())
+	}
+}

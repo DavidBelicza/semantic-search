@@ -235,3 +235,31 @@ func TestCodeStrategyWindowsOversizedDefinition(t *testing.T) {
 		t.Fatalf("expected the oversized function windowed into multiple chunks, got %d", len(chunks))
 	}
 }
+
+func TestCodeFlatFamilyAndEmpty(t *testing.T) {
+	if flat := sectionsOf(t, "q.sql", "SELECT 1;\nSELECT 2;"); len(flat) != 1 {
+		t.Fatalf("expected one flat section for SQL, got %d", len(flat))
+	}
+	if empty := sectionsOf(t, "q.sql", "   \n\n"); empty != nil {
+		t.Fatalf("expected no sections for blank source, got %#v", empty)
+	}
+}
+
+func TestCodeNoDefinitionsFallsBackToFlat(t *testing.T) {
+	if s := sectionsOf(t, "vars.go", "package p\n\nvar x = 1\nvar y = 2\n"); len(s) != 1 {
+		t.Fatalf("expected a single flat section for a file with no definitions, got %d", len(s))
+	}
+}
+
+func TestCodeDefinitionAtTopHasNoHeader(t *testing.T) {
+	if s := sectionsOf(t, "top.go", "func A() {\n\treturn\n}\n"); len(s) != 1 {
+		t.Fatalf("expected one section (func, no header), got %d", len(s))
+	}
+}
+
+func TestCodeChunkEmptyReturnsNil(t *testing.T) {
+	chunks, err := newCode().Chunk(storage.Document{AbsolutePath: "x.go"}, strategy.ParsedDocument{})
+	if err != nil || chunks != nil {
+		t.Fatalf("expected nil chunks for empty parse, got %v %#v", err, chunks)
+	}
+}
