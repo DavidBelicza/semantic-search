@@ -70,7 +70,7 @@ jobs:
         run: go test ./...
 
   postgres-e2e:
-    name: Postgres E2E
+    name: Test & Coverage
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -100,8 +100,17 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Test (postgres + pgvector + e2e)
-        run: go test ./core/storage/postgres/ ./core/storage/pgvector/ ./test/e2e/
+      # The Postgres DSN is set for this job, so the whole suite runs (including the Postgres and
+      # pgvector stores), giving a complete coverage profile.
+      - name: Test with coverage
+        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.out
+          fail_ci_if_error: false
 
   lint:
     name: Lint

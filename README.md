@@ -6,6 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/DavidBelicza/semantic-search/actions/workflows/ci.yml"><img src="https://github.com/DavidBelicza/semantic-search/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://codecov.io/gh/DavidBelicza/semantic-search"><img src="https://codecov.io/gh/DavidBelicza/semantic-search/branch/main/graph/badge.svg" alt="codecov"></a>
   <a href="https://github.com/DavidBelicza/semantic-search/releases"><img src="https://img.shields.io/github/v/release/DavidBelicza/semantic-search?sort=semver" alt="Release"></a>
   <a href="https://pkg.go.dev/github.com/davidbelicza/semantic-search"><img src="https://pkg.go.dev/badge/github.com/davidbelicza/semantic-search.svg" alt="Go Reference"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/DavidBelicza/semantic-search" alt="License"></a>
