@@ -241,3 +241,43 @@ func (s *memoryVectorStore) Replace(_ context.Context, embeddings []storage.Chun
 	s.embeddings = append(s.embeddings, embeddings...)
 	return nil
 }
+
+type replaceErrVectorStore struct{ memoryVectorStore }
+
+func (*replaceErrVectorStore) Replace(context.Context, []storage.ChunkEmbedding) error {
+	return errors.New("replace failed")
+}
+
+type markErrStore struct{ *memoryStore }
+
+func (markErrStore) MarkDocumentEmbedded(context.Context, string, string) error {
+	return errors.New("mark failed")
+}
+
+func TestProcessScannedReturnsVectorReplaceError(t *testing.T) {
+	path := writeFile(t, "abcdefg")
+	store := &memoryStore{
+		documents: []storage.Document{{ID: 42, FileID: "1:100", AbsolutePath: path, Status: storage.DocumentStatusScanned}},
+		chunks:    map[int64][]storage.Chunk{},
+		nextID:    100,
+	}
+	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
+
+	if err := Process(context.Background(), store, &replaceErrVectorStore{}, pool, false); err == nil {
+		t.Fatal("expected a vector replace error")
+	}
+}
+
+func TestProcessScannedReturnsMarkEmbeddedError(t *testing.T) {
+	path := writeFile(t, "abcdefg")
+	inner := &memoryStore{
+		documents: []storage.Document{{ID: 42, FileID: "1:100", AbsolutePath: path, Status: storage.DocumentStatusScanned}},
+		chunks:    map[int64][]storage.Chunk{},
+		nextID:    100,
+	}
+	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
+
+	if err := Process(context.Background(), markErrStore{inner}, &memoryVectorStore{}, pool, false); err == nil {
+		t.Fatal("expected a mark-embedded error")
+	}
+}

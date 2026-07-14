@@ -109,3 +109,25 @@ func TestMarkdownParseBlankIsNoSections(t *testing.T) {
 		t.Fatalf("expected no sections for blank content: %#v", parsed.Sections)
 	}
 }
+
+func TestMarkdownStrategyChunkSplitsOversizedFence(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("# Title\n\n```\n")
+	for i := 0; i < 400; i++ {
+		b.WriteString("this is a fairly long line of code inside a fenced block number\n")
+	}
+	b.WriteString("```\n")
+
+	s := newMarkdown()
+	parsed, err := s.Parse([]byte(b.String()))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	chunks, err := s.Chunk(storage.Document{}, parsed)
+	if err != nil {
+		t.Fatalf("chunk: %v", err)
+	}
+	if len(chunks) < 2 {
+		t.Fatalf("expected the oversized fence split into multiple chunks, got %d", len(chunks))
+	}
+}

@@ -182,3 +182,36 @@ func titles(chunks []storage.Chunk) []string {
 	}
 	return out
 }
+
+func TestParseUsesStyleNameLevelWithoutOutline(t *testing.T) {
+	styles := `<w:styles ` + wNS + `><w:style w:type="paragraph" w:styleId="H3"><w:name w:val="heading 3"/></w:style></w:styles>`
+	doc := document(para("H3", "Deep Heading") + para("", "Body text under the heading."))
+
+	parsed, err := newDocx().Parse(makeDocx(t, doc, styles))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	found := false
+	for _, s := range parsed.Sections {
+		if len(s.Path) > 0 && s.Path[len(s.Path)-1] == "Deep Heading" && strings.Contains(s.Body, "Body text") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a heading-name-based section, got %#v", parsed.Sections)
+	}
+}
+
+func TestParseRejectsMissingDocumentPart(t *testing.T) {
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+	writeZipPart(t, zw, "word/styles.xml", headingStyles()) // no word/document.xml
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+
+	if _, err := newDocx().Parse(buf.Bytes()); err == nil {
+		t.Fatal("expected an error when word/document.xml is missing")
+	}
+}

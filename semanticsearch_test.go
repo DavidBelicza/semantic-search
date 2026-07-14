@@ -2,6 +2,7 @@ package semanticsearch
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -352,4 +353,17 @@ func TestNewPostgresConstructors(t *testing.T) {
 		t.Fatalf("pgvector storage: %v", err)
 	}
 	defer vectors.Close()
+}
+
+func TestEngineIndexPropagatesStrategyBuildError(t *testing.T) {
+	failing := StrategyFactory{
+		Extensions: []string{".xyz"},
+		Build: func(strategy.EmbeddingModel, strategy.AiClient) (strategy.Strategy, func() error, error) {
+			return nil, nil, errors.New("build boom")
+		},
+	}
+	engine := newTestEngine(t, failing)
+	if err := engine.Index(context.Background(), t.TempDir(), IndexOptions{}); err == nil {
+		t.Fatal("expected the strategy build error to propagate")
+	}
 }

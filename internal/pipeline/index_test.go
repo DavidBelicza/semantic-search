@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/davidbelicza/semantic-search/core/search"
 	"github.com/davidbelicza/semantic-search/core/storage"
@@ -114,7 +116,12 @@ func TestPipelineIndexProcessSearchCleanup(t *testing.T) {
 		t.Fatalf("process: %v", err)
 	}
 
-	// Re-index unchanged files: hits the fingerprint checkpoint fast path.
+	// Touch a file (new mtime, same content) then re-index: the document returns to "indexed",
+	// and fingerprinting restores it to "embedded" because its content hash is unchanged.
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(keep, future, future); err != nil {
+		t.Fatal(err)
+	}
 	if err := pipeline.Index(ctx, store, pool, root, pipeline.Options{}, false); err != nil {
 		t.Fatalf("reindex: %v", err)
 	}
@@ -137,5 +144,50 @@ func TestPipelineIndexProcessSearchCleanup(t *testing.T) {
 	remaining, err := store.DocumentsFromID(ctx, 0, 100)
 	if err != nil || len(remaining) != 1 {
 		t.Fatalf("expected one document after cleanup, got %v %+v", err, remaining)
+	}
+}
+
+func TestIndexFollowsSymlinksAndSkipsHidden(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "real.md"), []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "real.md"), filepath.Join(root, "link.md")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	hidden := filepath.Join(root, ".hidden")
+	if err := os.MkdirAll(hidden, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hidden, "secret.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.EnsureSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	pool := strategy.NewPool(markdown.NewMarkdownStrategy(general.NewGeneralStrategy(nil, nil)))
+	if err := pipeline.Index(ctx, store, pool, root, pipeline.Options{FollowSymlinks: true}, false); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+
+	docs, err := store.DocumentsByStatus(ctx, storage.DocumentStatusScanned, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) == 0 {
+		t.Fatal("expected at least the real markdown file indexed")
+	}
+	for _, d := range docs {
+		if strings.Contains(d.AbsolutePath, ".hidden") {
+			t.Fatalf("hidden file should be skipped: %q", d.AbsolutePath)
+		}
 	}
 }

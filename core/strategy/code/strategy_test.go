@@ -213,3 +213,25 @@ func titles(chunks []storage.Chunk) []string {
 	}
 	return out
 }
+
+func TestCodeStrategyWindowsOversizedDefinition(t *testing.T) {
+	var body strings.Builder
+	body.WriteString("package p\n\nfunc Big() {\n")
+	for i := 0; i < 400; i++ {
+		body.WriteString("\tx := doWork(veryLongVariableName, anotherLongName, yetAnotherName)\n")
+	}
+	body.WriteString("}\n")
+
+	s := newCode()
+	parsed, err := s.Parse([]byte(body.String()))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	chunks, err := s.Chunk(storage.Document{AbsolutePath: "big.go"}, parsed)
+	if err != nil {
+		t.Fatalf("chunk: %v", err)
+	}
+	if len(chunks) < 2 {
+		t.Fatalf("expected the oversized function windowed into multiple chunks, got %d", len(chunks))
+	}
+}
