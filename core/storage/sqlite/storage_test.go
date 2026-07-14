@@ -550,3 +550,40 @@ func TestSearchAndCleanupQueries(t *testing.T) {
 		t.Fatalf("expected chunks removed: %v %+v", err, left)
 	}
 }
+
+func TestSqliteMethodsErrorOnClosedStore(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	if err := store.EnsureSchema(ctx); err != nil {
+		t.Fatalf("schema: %v", err)
+	}
+	if store.DB() == nil {
+		t.Fatal("expected a non-nil DB handle")
+	}
+	store.Close()
+
+	if _, err := store.ChunkMetadataByIDs(ctx, []int64{1}); err == nil {
+		t.Fatal("expected error: ChunkMetadataByIDs on closed store")
+	}
+	if _, err := store.ChunkDocumentIDs(ctx, []int64{1}); err == nil {
+		t.Fatal("expected error: ChunkDocumentIDs on closed store")
+	}
+	if _, err := store.DocumentsByIDs(ctx, []int64{1}); err == nil {
+		t.Fatal("expected error: DocumentsByIDs on closed store")
+	}
+	if _, err := store.DocumentsFromID(ctx, 0, 10); err == nil {
+		t.Fatal("expected error: DocumentsFromID on closed store")
+	}
+	if _, err := store.ChunksByDocumentID(ctx, 1); err == nil {
+		t.Fatal("expected error: ChunksByDocumentID on closed store")
+	}
+	if err := store.DeleteDocument(ctx, 1); err == nil {
+		t.Fatal("expected error: DeleteDocument on closed store")
+	}
+	if _, err := store.DocumentsByStatus(ctx, "indexed", 0, 10); err == nil {
+		t.Fatal("expected error: DocumentsByStatus on closed store")
+	}
+	if err := store.UpsertDocuments(ctx, []storage.FileMetadata{{FileID: "x", AbsolutePath: "/x"}}); err == nil {
+		t.Fatal("expected error: UpsertDocuments on closed store")
+	}
+}

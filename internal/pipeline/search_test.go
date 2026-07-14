@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/davidbelicza/semantic-search/core/search"
@@ -164,5 +165,64 @@ func TestDocumentSearcherGroupsAndHydratesSurvivorsOnly(t *testing.T) {
 		if id == 3 {
 			t.Fatalf("hydrated a dropped chunk (3); survivors were %v", store.hydrated)
 		}
+	}
+}
+
+type errBuildModel struct{ fakeModel }
+
+func (errBuildModel) BuildQuery(string, string) (string, error) { return "", errors.New("build") }
+
+type errEmbedClient struct{}
+
+func (errEmbedClient) Embed(context.Context, []string) ([][]float32, error) {
+	return nil, errors.New("embed")
+}
+
+type twoVecClient struct{}
+
+func (twoVecClient) Embed(context.Context, []string) ([][]float32, error) {
+	return [][]float32{{1, 0, 0}, {0, 1, 0}}, nil
+}
+
+type errMappingStore struct{ fakeSearchStore }
+
+func (errMappingStore) ChunkDocumentIDs(context.Context, []int64) ([]storage.ChunkDocument, error) {
+	return nil, errors.New("mapping")
+}
+
+type errVectorStore struct{}
+
+func (errVectorStore) Search(context.Context, []float32, int) ([]storage.VectorHit, error) {
+	return nil, errors.New("vector")
+}
+
+func TestDocumentSearcherPropagatesErrors(t *testing.T) {
+	ctx := context.Background()
+	base := &fakeSearchStore{docByChunk: map[int64]int64{1: 9}, meta: map[int64]storage.ChunkMetadata{}, paths: map[int64]string{}}
+	hits := fakeVectorStore{hits: []storage.VectorHit{{ChunkID: 1, Distance: 0.1}}}
+	cfg := search.SearchConfig{Query: "q"}
+
+	if _, err := NewDocumentSearcher(base, hits, errBuildModel{}, fakeClient{}).Search(ctx, cfg); err == nil {
+		t.Fatal("expected a build-query error")
+	}
+	if _, err := NewDocumentSearcher(base, hits, fakeModel{}, errEmbedClient{}).Search(ctx, cfg); err == nil {
+		t.Fatal("expected an embed error")
+	}
+	if _, err := NewDocumentSearcher(base, hits, fakeModel{}, twoVecClient{}).Search(ctx, cfg); err == nil {
+		t.Fatal("expected an embedding-count error")
+	}
+	if _, err := NewDocumentSearcher(&errMappingStore{*base}, hits, fakeModel{}, fakeClient{}).Search(ctx, cfg); err == nil {
+		t.Fatal("expected a mapping error")
+	}
+	if _, err := NewDocumentSearcher(base, errVectorStore{}, fakeModel{}, fakeClient{}).Search(ctx, cfg); err == nil {
+		t.Fatal("expected a vector-store error")
+	}
+}
+
+func TestDocumentSearcherNoHitsReturnsEmpty(t *testing.T) {
+	store := &fakeSearchStore{docByChunk: map[int64]int64{}, meta: map[int64]storage.ChunkMetadata{}, paths: map[int64]string{}}
+	docs, err := NewDocumentSearcher(store, fakeVectorStore{}, fakeModel{}, fakeClient{}).Search(context.Background(), search.SearchConfig{Query: "q"})
+	if err != nil || len(docs) != 0 {
+		t.Fatalf("expected no results, got %v %#v", err, docs)
 	}
 }

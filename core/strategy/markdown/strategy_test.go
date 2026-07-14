@@ -79,3 +79,33 @@ func TestMarkdownStrategyChunkSplitsOversizedSection(t *testing.T) {
 		}
 	}
 }
+
+func TestMarkdownParseWithoutHeadings(t *testing.T) {
+	parsed, err := newMarkdown().Parse([]byte("Just some plain text\nwith no headings at all."))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(parsed.Sections) != 1 || !strings.Contains(parsed.Sections[0].Body, "plain text") {
+		t.Fatalf("expected a single whole-document section: %#v", parsed.Sections)
+	}
+}
+
+func TestMarkdownParsePreambleBeforeFirstHeading(t *testing.T) {
+	parsed, err := newMarkdown().Parse([]byte("Intro paragraph before any heading.\n\n# Guide\nBody."))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(parsed.Sections) < 2 || !strings.Contains(parsed.Sections[0].Body, "Intro paragraph") {
+		t.Fatalf("expected a preamble section first: %#v", parsed.Sections)
+	}
+}
+
+func TestMarkdownParseBlankIsNoSections(t *testing.T) {
+	parsed, err := newMarkdown().Parse([]byte("   \n\n  "))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(parsed.Sections) != 0 {
+		t.Fatalf("expected no sections for blank content: %#v", parsed.Sections)
+	}
+}

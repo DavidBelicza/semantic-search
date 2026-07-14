@@ -333,3 +333,23 @@ func TestNewAiEmbedderWithTimeout(t *testing.T) {
 		t.Fatal("expected an embedder")
 	}
 }
+
+func TestNewPostgresConstructors(t *testing.T) {
+	dsn := os.Getenv("SEMANTIC_SEARCH_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set SEMANTIC_SEARCH_POSTGRES_DSN to run postgres constructor tests")
+	}
+	ctx := context.Background()
+
+	store, err := NewPostgresStorage(ctx, dsn)
+	if err != nil {
+		t.Fatalf("postgres storage: %v", err)
+	}
+	defer store.Close()
+
+	vectors, err := NewPostgresVectorStorage(ctx, dsn, 8, PostgresKNN)
+	if err != nil {
+		t.Fatalf("pgvector storage: %v", err)
+	}
+	defer vectors.Close()
+}

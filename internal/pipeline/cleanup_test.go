@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -70,5 +71,42 @@ func TestCleanupDeletesOnlyMissingFiles(t *testing.T) {
 	}
 	if len(vectors.deleted) != 2 || vectors.deleted[0] != 20 || vectors.deleted[1] != 21 {
 		t.Fatalf("expected the missing document's vectors deleted, got %v", vectors.deleted)
+	}
+}
+
+type errListStore struct{ fakeCleanupStore }
+
+func (errListStore) DocumentsFromID(context.Context, int64, int) ([]storage.Document, error) {
+	return nil, errors.New("list")
+}
+
+type errDeleteStore struct{ fakeCleanupStore }
+
+func (errDeleteStore) DeleteDocument(context.Context, int64) error { return errors.New("delete") }
+
+type errDeleteVectors struct{}
+
+func (errDeleteVectors) Delete(context.Context, []int64) error { return errors.New("vectors") }
+
+func TestCleanupPropagatesErrors(t *testing.T) {
+	ctx := context.Background()
+	missing := filepath.Join(t.TempDir(), "gone.md") // never created, so the file is missing
+
+	if err := Cleanup(ctx, &errListStore{}, &fakeCleanupVectorStore{}, false); err == nil {
+		t.Fatal("expected a list error")
+	}
+
+	missingDoc := func() *fakeCleanupStore {
+		return &fakeCleanupStore{
+			documents: []storage.Document{{ID: 1, AbsolutePath: missing}},
+			chunks:    map[int64][]storage.Chunk{1: {{ID: 10}}},
+		}
+	}
+
+	if err := Cleanup(ctx, missingDoc(), errDeleteVectors{}, true); err == nil {
+		t.Fatal("expected a vector-delete error with failFast")
+	}
+	if err := Cleanup(ctx, &errDeleteStore{*missingDoc()}, &fakeCleanupVectorStore{}, false); err == nil {
+		t.Fatal("expected a document-delete error collected without failFast")
 	}
 }

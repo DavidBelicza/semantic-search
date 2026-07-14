@@ -165,3 +165,79 @@ func TestPostgresChunkLookups(t *testing.T) {
 		t.Fatalf("empty documents: %v %+v", err, d)
 	}
 }
+
+func TestPostgresReconcileKeepAndUpdates(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+
+	if err := store.UpsertDocuments(ctx, []storage.FileMetadata{
+		{FileID: "f1", AbsolutePath: "/a.md", SizeBytes: 1, ModifiedAtNS: 1},
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	docs, err := store.DocumentsByStatus(ctx, "indexed", 0, 10)
+	if err != nil || len(docs) != 1 {
+		t.Fatalf("by status: %v %+v", err, docs)
+	}
+	id := docs[0].ID
+
+	if _, err := store.ApplyDocumentChunkReconcile(ctx, id, storage.ReconcileChunks(nil, []storage.Chunk{
+		{ChunkIndex: 0, Text: "a", ContentHash: "h1"},
+		{ChunkIndex: 1, Text: "b", ContentHash: "h2"},
+	})); err != nil {
+		t.Fatalf("initial reconcile: %v", err)
+	}
+
+	// Re-reconcile keeping both chunks (reordered) plus a new one: exercises the kept-chunk
+	// reindex path (temporary-index swap) and an insert.
+	existing, err := store.ChunksByDocumentID(ctx, id)
+	if err != nil {
+		t.Fatalf("existing: %v", err)
+	}
+	plan := storage.ReconcileChunks(existing, []storage.Chunk{
+		{ChunkIndex: 0, Text: "b", ContentHash: "h2"},
+		{ChunkIndex: 1, Text: "a", ContentHash: "h1"},
+		{ChunkIndex: 2, Text: "c", ContentHash: "h3"},
+	})
+	if _, err := store.ApplyDocumentChunkReconcile(ctx, id, plan); err != nil {
+		t.Fatalf("re-reconcile: %v", err)
+	}
+
+	if err := store.UpdateDocumentContentHashAndStatus(ctx, "f1", "hash", "scanned"); err != nil {
+		t.Fatalf("update content hash: %v", err)
+	}
+	if err := store.UpdateDocumentScanCheckpointAndStatus(ctx, "f1", "embedded"); err != nil {
+		t.Fatalf("update checkpoint: %v", err)
+	}
+}
+
+func TestPostgresMethodsErrorOnClosedStore(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	store.Close()
+
+	if _, err := store.DocumentsByStatus(ctx, "indexed", 0, 10); err == nil {
+		t.Fatal("expected error: DocumentsByStatus")
+	}
+	if _, err := store.ChunkMetadataByIDs(ctx, []int64{1}); err == nil {
+		t.Fatal("expected error: ChunkMetadataByIDs")
+	}
+	if _, err := store.ChunkDocumentIDs(ctx, []int64{1}); err == nil {
+		t.Fatal("expected error: ChunkDocumentIDs")
+	}
+	if _, err := store.DocumentsByIDs(ctx, []int64{1}); err == nil {
+		t.Fatal("expected error: DocumentsByIDs")
+	}
+	if _, err := store.DocumentsFromID(ctx, 0, 10); err == nil {
+		t.Fatal("expected error: DocumentsFromID")
+	}
+	if _, err := store.ChunksByDocumentID(ctx, 1); err == nil {
+		t.Fatal("expected error: ChunksByDocumentID")
+	}
+	if err := store.DeleteDocument(ctx, 1); err == nil {
+		t.Fatal("expected error: DeleteDocument")
+	}
+	if err := store.UpsertDocuments(ctx, []storage.FileMetadata{{FileID: "x", AbsolutePath: "/x"}}); err == nil {
+		t.Fatal("expected error: UpsertDocuments")
+	}
+}

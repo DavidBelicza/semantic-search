@@ -116,3 +116,46 @@ func TestPgvectorHNSWSearch(t *testing.T) {
 		t.Fatalf("want chunk 1 as nearest, got %+v", hits)
 	}
 }
+
+func TestPgvectorOpenRejectsBadDimensions(t *testing.T) {
+	if os.Getenv("SEMANTIC_SEARCH_POSTGRES_DSN") == "" {
+		t.Skip("set SEMANTIC_SEARCH_POSTGRES_DSN")
+	}
+	if _, err := Open(context.Background(), os.Getenv("SEMANTIC_SEARCH_POSTGRES_DSN"), 0, false); err == nil {
+		t.Fatal("expected an error for zero dimensions")
+	}
+}
+
+func TestPgvectorReplaceAndDeleteEdges(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t, 3, false)
+
+	if err := store.Replace(ctx, nil); err != nil {
+		t.Fatalf("empty replace: %v", err)
+	}
+	if err := store.Delete(ctx, nil); err != nil {
+		t.Fatalf("empty delete: %v", err)
+	}
+	if err := store.Replace(ctx, []storage.ChunkEmbedding{{ChunkID: 0, Vector: []float32{1, 0, 0}}}); err == nil {
+		t.Fatal("expected an error for a zero chunk id")
+	}
+	if err := store.Replace(ctx, []storage.ChunkEmbedding{{ChunkID: 1, Vector: []float32{1, 0}}}); err == nil {
+		t.Fatal("expected a dimension mismatch error")
+	}
+}
+
+func TestPgvectorMethodsErrorOnClosedStore(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t, 3, false)
+	store.Close()
+
+	if _, err := store.Search(ctx, []float32{1, 0, 0}, 5); err == nil {
+		t.Fatal("expected error: Search on closed store")
+	}
+	if err := store.Replace(ctx, []storage.ChunkEmbedding{{ChunkID: 1, Vector: []float32{1, 0, 0}}}); err == nil {
+		t.Fatal("expected error: Replace on closed store")
+	}
+	if err := store.Delete(ctx, []int64{1}); err == nil {
+		t.Fatal("expected error: Delete on closed store")
+	}
+}

@@ -140,3 +140,19 @@ func TestReplaceHandlesZeroVector(t *testing.T) {
 		t.Fatalf("zero vector replace: %v", err)
 	}
 }
+
+func TestSqlitevecMethodsErrorOnClosedStore(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	store.Close()
+
+	if _, err := store.Search(ctx, []float32{1, 0, 0}, 5); err == nil {
+		t.Fatal("expected error: Search on closed store")
+	}
+	if err := store.Replace(ctx, []storage.ChunkEmbedding{{ChunkID: 1, Vector: []float32{1, 0, 0}}}); err == nil {
+		t.Fatal("expected error: Replace on closed store")
+	}
+	if err := store.Delete(ctx, []int64{1}); err == nil {
+		t.Fatal("expected error: Delete on closed store")
+	}
+}

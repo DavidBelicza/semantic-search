@@ -289,3 +289,117 @@ func TestOpenAIClientRetriesExhaustedReturnsError(t *testing.T) {
 		t.Fatalf("expected 3 attempts (1 + 2 retries), got %d", got)
 	}
 }
+
+func TestEmbeddingsEndpointVariants(t *testing.T) {
+	if _, err := embeddingsEndpoint("://nope"); err == nil {
+		t.Fatal("expected a parse error")
+	}
+	if _, err := embeddingsEndpoint("/no/host"); err == nil {
+		t.Fatal("expected a missing scheme/host error")
+	}
+	if got, err := embeddingsEndpoint("http://h:1/v1/embeddings"); err != nil || got != "http://h:1/v1/embeddings" {
+		t.Fatalf("suffix passthrough: %v %q", err, got)
+	}
+	if got, err := embeddingsEndpoint("http://h:1"); err != nil || got != "http://h:1/v1/embeddings" {
+		t.Fatalf("append: %v %q", err, got)
+	}
+}
+
+func TestIsRetryableStatus(t *testing.T) {
+	if !isRetryableStatus(429) || !isRetryableStatus(503) {
+		t.Fatal("429 and 503 should be retryable")
+	}
+	if isRetryableStatus(400) {
+		t.Fatal("400 should not be retryable")
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	if truncate("abc", 10) != "abc" || truncate("abcdef", 3) != "abc" {
+		t.Fatal("truncate behavior mismatch")
+	}
+}
+
+func TestBackoffDelayCaps(t *testing.T) {
+	c := OpenAIClient{}
+	if c.backoffDelay(0) != DefaultBackoffBase {
+		t.Fatalf("attempt 0 should be the base delay, got %v", c.backoffDelay(0))
+	}
+	if c.backoffDelay(100) != DefaultBackoffMax {
+		t.Fatalf("a large attempt should cap at the max, got %v", c.backoffDelay(100))
+	}
+}
+
+func TestResponseError(t *testing.T) {
+	if err := responseError(500, nil); err == nil || !strings.Contains(err.Error(), "500") {
+		t.Fatalf("empty body: %v", err)
+	}
+	if err := responseError(500, []byte("boom")); !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("plain body: %v", err)
+	}
+	if err := responseError(500, []byte(`{"error":{"message":"nope"}}`)); !strings.Contains(err.Error(), "nope") {
+		t.Fatalf("provider message: %v", err)
+	}
+}
+
+func TestParseEmbeddingsErrors(t *testing.T) {
+	if _, err := parseEmbeddings([]byte("not json"), 1); err == nil {
+		t.Fatal("expected a decode error")
+	}
+	if _, err := parseEmbeddings([]byte(`{"data":[{"index":5,"embedding":[1]}]}`), 1); err == nil {
+		t.Fatal("expected an index-out-of-range error")
+	}
+}
+
+func TestValidateDimensions(t *testing.T) {
+	if err := (OpenAIClient{Dimensions: 0}).validateDimensions([][]float32{{1}}); err != nil {
+		t.Fatalf("zero dimensions should skip validation: %v", err)
+	}
+	if err := (OpenAIClient{Dimensions: 2}).validateDimensions([][]float32{{1, 2}}); err != nil {
+		t.Fatalf("matching dimensions should pass: %v", err)
+	}
+	if err := (OpenAIClient{Dimensions: 2}).validateDimensions([][]float32{{1}}); err == nil {
+		t.Fatal("expected a dimension mismatch error")
+	}
+}
+
+func TestEmbeddingErrorUnmarshalJSON(t *testing.T) {
+	var e embeddingError
+	if err := e.UnmarshalJSON([]byte("null")); err != nil || e.Message != "" {
+		t.Fatalf("null: %v %q", err, e.Message)
+	}
+	e = embeddingError{}
+	if err := e.UnmarshalJSON([]byte(`{"message":"boom"}`)); err != nil || e.Message != "boom" {
+		t.Fatalf("object form: %v %q", err, e.Message)
+	}
+	if err := (&embeddingError{}).UnmarshalJSON([]byte("123")); err == nil {
+		t.Fatal("expected an error for an unexpected shape")
+	}
+}
+
+func TestEmbedEarlyReturns(t *testing.T) {
+	ctx := context.Background()
+	if v, err := (OpenAIClient{Model: "m"}).Embed(ctx, nil); v != nil || err != nil {
+		t.Fatalf("empty input: %v %v", v, err)
+	}
+	if _, err := (OpenAIClient{Model: "  "}).Embed(ctx, []string{"x"}); err == nil {
+		t.Fatal("expected an error for an empty model")
+	}
+	if _, err := (OpenAIClient{Model: "m", BaseURL: "/no-scheme"}).Embed(ctx, []string{"x"}); err == nil {
+		t.Fatal("expected an error for a bad base url")
+	}
+}
+
+func TestClientDefaultsWhenNil(t *testing.T) {
+	if (OpenAIClient{}).client() == nil {
+		t.Fatal("expected a default http client")
+	}
+}
+
+func TestSleepBackoffCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := sleepBackoff(ctx, time.Hour); err == nil {
+		t.Fatal("expected a context error")
+	}
+}
