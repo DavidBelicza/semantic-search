@@ -2,6 +2,7 @@ package pipeline_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -189,5 +190,216 @@ func TestIndexFollowsSymlinksAndSkipsHidden(t *testing.T) {
 		if strings.Contains(d.AbsolutePath, ".hidden") {
 			t.Fatalf("hidden file should be skipped: %q", d.AbsolutePath)
 		}
+	}
+}
+
+// fakeIndexStore is a configurable IndexStore: each error field, when set, makes the matching
+// method fail, and toFingerprint is served once by DocumentsByStatus so the fingerprint loop
+// terminates.
+type fakeIndexStore struct {
+	upsertErr     error
+	byStatusErr   error
+	updateHashErr error
+	checkpointErr error
+	toFingerprint []storage.Document
+	served        bool
+}
+
+func (s *fakeIndexStore) UpsertDocuments(context.Context, []storage.FileMetadata) error {
+	return s.upsertErr
+}
+
+func (s *fakeIndexStore) DocumentsByStatus(_ context.Context, _ string, _ int64, _ int) ([]storage.Document, error) {
+	if s.byStatusErr != nil {
+		return nil, s.byStatusErr
+	}
+	if s.served {
+		return nil, nil
+	}
+	s.served = true
+	return s.toFingerprint, nil
+}
+
+func (s *fakeIndexStore) UpdateDocumentContentHashAndStatus(context.Context, string, string, string) error {
+	return s.updateHashErr
+}
+
+func (s *fakeIndexStore) UpdateDocumentScanCheckpointAndStatus(context.Context, string, string) error {
+	return s.checkpointErr
+}
+
+// probeStrategy is a configurable strategy for the index walk: it can claim by extension, fail
+// CreateMetadata, and return a fixed fingerprint.
+type probeStrategy struct {
+	claimExt string
+	metaErr  error
+	fp       string
+}
+
+func (s probeStrategy) Claims(path string) bool {
+	return s.claimExt == "" || strings.HasSuffix(path, s.claimExt)
+}
+func (probeStrategy) Parse([]byte) (strategy.ParsedDocument, error) {
+	return strategy.ParsedDocument{}, nil
+}
+func (probeStrategy) Chunk(storage.Document, strategy.ParsedDocument) ([]storage.Chunk, error) {
+	return nil, nil
+}
+func (probeStrategy) Embed(context.Context, []storage.Chunk) ([][]float32, error) { return nil, nil }
+func (s probeStrategy) Fingerprint([]byte) string                                 { return s.fp }
+func (s probeStrategy) CreateMetadata(ref strategy.FileRef) (storage.FileMetadata, error) {
+	if s.metaErr != nil {
+		return storage.FileMetadata{}, s.metaErr
+	}
+	return storage.FileMetadata{FileID: ref.Path, AbsolutePath: ref.Path}, nil
+}
+
+func TestIndexReturnsDiscoverError(t *testing.T) {
+	pool := strategy.NewPool(probeStrategy{})
+	err := pipeline.Index(context.Background(), &fakeIndexStore{}, pool, filepath.Join(t.TempDir(), "missing"), pipeline.Options{}, false)
+	if err == nil {
+		t.Fatal("expected a discover error for a nonexistent root")
+	}
+}
+
+func TestIndexReturnsUpsertError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pool := strategy.NewPool(probeStrategy{})
+	store := &fakeIndexStore{upsertErr: errors.New("upsert failed")}
+	if err := pipeline.Index(context.Background(), store, pool, dir, pipeline.Options{}, false); err == nil {
+		t.Fatal("expected an upsert error")
+	}
+}
+
+func TestDiscoverSkipsHiddenFilesAndUnfollowedSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".secret.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	real := filepath.Join(dir, "real.md")
+	if err := os.WriteFile(real, []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(dir, "link.md")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	pool := strategy.NewPool(probeStrategy{})
+	store := &fakeIndexStore{}
+	// FollowSymlinks is false, so the symlink is stat'd as non-regular and skipped; the hidden
+	// file is skipped too. Only real.md is a regular claimed file.
+	if err := pipeline.Index(context.Background(), store, pool, dir, pipeline.Options{}, false); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+}
+
+func TestFileMetadataErrorsAbortDiscovery(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pool := strategy.NewPool(probeStrategy{metaErr: errors.New("metadata failed")})
+	if err := pipeline.Index(context.Background(), &fakeIndexStore{}, pool, dir, pipeline.Options{}, false); err == nil {
+		t.Fatal("expected a CreateMetadata error to abort discovery")
+	}
+}
+
+func TestFileInfoErrorOnFollowedDanglingSymlink(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Symlink(filepath.Join(dir, "nowhere.md"), filepath.Join(dir, "link.md")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	pool := strategy.NewPool(probeStrategy{})
+	if err := pipeline.Index(context.Background(), &fakeIndexStore{}, pool, dir, pipeline.Options{FollowSymlinks: true}, false); err == nil {
+		t.Fatal("expected a stat error following a dangling symlink")
+	}
+}
+
+func TestFingerprintReturnsByStatusError(t *testing.T) {
+	pool := strategy.NewPool(probeStrategy{})
+	store := &fakeIndexStore{byStatusErr: errors.New("by status failed")}
+	if err := pipeline.Index(context.Background(), store, pool, t.TempDir(), pipeline.Options{}, false); err == nil {
+		t.Fatal("expected a DocumentsByStatus error")
+	}
+}
+
+func TestFingerprintNoStrategyForDocument(t *testing.T) {
+	store := &fakeIndexStore{toFingerprint: []storage.Document{
+		{ID: 1, FileID: "1", AbsolutePath: "/gone/file.md"},
+	}}
+	pool := strategy.NewPool() // empty: no strategy claims the document
+	if err := pipeline.Index(context.Background(), store, pool, t.TempDir(), pipeline.Options{}, true); err == nil {
+		t.Fatal("expected a no-strategy error")
+	}
+}
+
+func TestFingerprintDocumentBranches(t *testing.T) {
+	dir := t.TempDir()
+	matchFile := filepath.Join(dir, "match.md")
+	if err := os.WriteFile(matchFile, []byte("body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := &fakeIndexStore{toFingerprint: []storage.Document{
+		// Metadata matches the scanned checkpoint: no hashing, just a checkpoint advance.
+		{ID: 1, FileID: "1", AbsolutePath: matchFile, HasHash: true, HasScannedMetadata: true,
+			FileSize: 10, ScannedFileSize: 10, ModifiedAtNS: 5, ScannedModifiedAtNS: 5},
+		// Content hash unchanged from what was scanned: restore to scanned via checkpoint.
+		{ID: 2, FileID: "2", AbsolutePath: matchFile, HasHash: true, ContentHash: "H"},
+		// File is gone: the read fails and the error is collected.
+		{ID: 3, FileID: "3", AbsolutePath: filepath.Join(dir, "gone.md")},
+	}}
+	pool := strategy.NewPool(probeStrategy{fp: "H"})
+
+	// failFast false collects the missing-file error but still processes the others.
+	if err := pipeline.Index(context.Background(), store, pool, dir, pipeline.Options{}, false); err == nil {
+		t.Fatal("expected the collected read error")
+	}
+}
+
+func TestFingerprintFailFastStopsOnFirstError(t *testing.T) {
+	store := &fakeIndexStore{toFingerprint: []storage.Document{
+		{ID: 1, FileID: "1", AbsolutePath: "/gone/file.md"},
+	}}
+	pool := strategy.NewPool(probeStrategy{fp: "H"})
+	if err := pipeline.Index(context.Background(), store, pool, t.TempDir(), pipeline.Options{}, true); err == nil {
+		t.Fatal("expected a fail-fast read error")
+	}
+}
+
+func TestFingerprintUpdateHashError(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "changed.md")
+	if err := os.WriteFile(file, []byte("new content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeIndexStore{
+		updateHashErr: errors.New("update failed"),
+		toFingerprint: []storage.Document{{ID: 1, FileID: "1", AbsolutePath: file, ContentHash: "old"}},
+	}
+	pool := strategy.NewPool(probeStrategy{fp: "new"})
+	if err := pipeline.Index(context.Background(), store, pool, dir, pipeline.Options{}, true); err == nil {
+		t.Fatal("expected an update-content-hash error")
+	}
+}
+
+func TestMarkCheckpointError(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "m.md")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeIndexStore{
+		checkpointErr: errors.New("checkpoint failed"),
+		toFingerprint: []storage.Document{{ID: 1, FileID: "1", AbsolutePath: file,
+			HasHash: true, HasScannedMetadata: true, FileSize: 1, ScannedFileSize: 1,
+			ModifiedAtNS: 2, ScannedModifiedAtNS: 2}},
+	}
+	pool := strategy.NewPool(probeStrategy{fp: "H"})
+	if err := pipeline.Index(context.Background(), store, pool, dir, pipeline.Options{}, true); err == nil {
+		t.Fatal("expected a checkpoint error")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/davidbelicza/semantic-search/core/storage"
 	"github.com/davidbelicza/semantic-search/core/strategy"
 )
 
@@ -379,5 +380,84 @@ func TestNewModelUnlistedWithDimensions(t *testing.T) {
 	m := NewModel("some-custom-model", 512)
 	if m.Name() != "some-custom-model" || m.Dimensions() != 512 {
 		t.Fatalf("unlisted model not configured: name=%q dims=%d", m.Name(), m.Dimensions())
+	}
+}
+
+func TestEngineIndexReturnsWalkError(t *testing.T) {
+	engine := newTestEngine(t, NewTextStrategy())
+	if err := engine.Index(context.Background(), filepath.Join(t.TempDir(), "missing"), IndexOptions{}); err == nil {
+		t.Fatal("expected a discover error for a nonexistent root")
+	}
+}
+
+// badParseStrategy claims .bad files, registers and fingerprints fine, but fails to parse, so the
+// error surfaces in the Process pipeline rather than during discovery.
+type badParseStrategy struct{}
+
+func (badParseStrategy) Claims(path string) bool { return filepath.Ext(path) == ".bad" }
+func (badParseStrategy) CreateMetadata(ref strategy.FileRef) (storage.FileMetadata, error) {
+	return storage.FileMetadata{FileID: ref.Path, AbsolutePath: ref.Path}, nil
+}
+func (badParseStrategy) Fingerprint([]byte) string { return "fp" }
+func (badParseStrategy) Parse([]byte) (strategy.ParsedDocument, error) {
+	return strategy.ParsedDocument{}, errors.New("parse failed")
+}
+func (badParseStrategy) Chunk(storage.Document, strategy.ParsedDocument) ([]storage.Chunk, error) {
+	return nil, nil
+}
+func (badParseStrategy) Embed(context.Context, []storage.Chunk) ([][]float32, error) {
+	return nil, nil
+}
+
+func TestEngineIndexReturnsProcessError(t *testing.T) {
+	factory := StrategyFactory{
+		Extensions: []string{".bad"},
+		Build: func(strategy.EmbeddingModel, strategy.AiClient) (strategy.Strategy, func() error, error) {
+			return badParseStrategy{}, nil, nil
+		},
+	}
+	engine := newTestEngine(t, factory)
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "doc.bad"), []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Index(context.Background(), dir, IndexOptions{FailFast: true}); err == nil {
+		t.Fatal("expected the process parse error to propagate")
+	}
+}
+
+func TestNewEngineRejectsDuplicateExtensionsWithFullConfig(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	store, _ := NewSQLiteStorage(ctx, filepath.Join(dir, "a.db"))
+	vectors, _ := NewSQLiteVectorStorage(ctx, filepath.Join(dir, "b.db"), 8)
+	defer store.Close()
+	defer vectors.Close()
+
+	_, err := NewEngine(Config{
+		Model:         NewModel(Gemma300mQAT),
+		Embedder:      fixedEmbedder{},
+		Storage:       store,
+		VectorStorage: vectors,
+		Strategies:    []StrategyFactory{NewTextStrategy(), NewTextStrategy()},
+	})
+	if err == nil {
+		t.Fatal("expected a duplicate-extension error with an otherwise valid config")
+	}
+}
+
+func TestEngineIndexReleasesOpenedStrategiesOnBuildError(t *testing.T) {
+	// The PDF factory opens a PDFium extractor (registering a closer); the failing factory that
+	// follows forces buildStrategies to release everything opened so far.
+	failing := StrategyFactory{
+		Extensions: []string{".xyz"},
+		Build: func(strategy.EmbeddingModel, strategy.AiClient) (strategy.Strategy, func() error, error) {
+			return nil, nil, errors.New("build boom")
+		},
+	}
+	engine := newTestEngine(t, NewPDFStrategy(), failing)
+	if err := engine.Index(context.Background(), t.TempDir(), IndexOptions{}); err == nil {
+		t.Fatal("expected the build error to propagate after releasing the PDF extractor")
 	}
 }

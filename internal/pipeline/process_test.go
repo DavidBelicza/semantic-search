@@ -281,3 +281,229 @@ func TestProcessScannedReturnsMarkEmbeddedError(t *testing.T) {
 		t.Fatal("expected a mark-embedded error")
 	}
 }
+
+// --- erroring stores (embed *memoryStore and override one method) ---
+
+type byStatusErrStore struct{ *memoryStore }
+
+func (byStatusErrStore) DocumentsByStatus(context.Context, string, int64, int) ([]storage.Document, error) {
+	return nil, errors.New("by status failed")
+}
+
+type reconcileErrStore struct{ *memoryStore }
+
+func (reconcileErrStore) ApplyDocumentChunkReconcile(context.Context, int64, storage.ChunkReconcilePlan) ([]storage.Chunk, error) {
+	return nil, errors.New("reconcile failed")
+}
+
+type chunksErrStore struct{ *memoryStore }
+
+func (chunksErrStore) ChunksByDocumentID(context.Context, int64) ([]storage.Chunk, error) {
+	return nil, errors.New("chunks failed")
+}
+
+type updateStatusErrStore struct{ *memoryStore }
+
+func (updateStatusErrStore) UpdateDocumentStatus(context.Context, string, string) error {
+	return errors.New("update status failed")
+}
+
+// secondChunksErrStore serves the first ChunksByDocumentID call (used by processScanned to load
+// existing chunks) and fails the second (used by chunksForEmbedding), isolating that branch.
+type secondChunksErrStore struct {
+	*memoryStore
+	calls int
+}
+
+func (s *secondChunksErrStore) ChunksByDocumentID(ctx context.Context, id int64) ([]storage.Chunk, error) {
+	s.calls++
+	if s.calls >= 2 {
+		return nil, errors.New("second chunks lookup failed")
+	}
+	return s.memoryStore.ChunksByDocumentID(ctx, id)
+}
+
+type deleteErrVectorStore struct{ memoryVectorStore }
+
+func (*deleteErrVectorStore) Delete(context.Context, []int64) error {
+	return errors.New("delete failed")
+}
+
+// --- strategy variants ---
+
+type parseErrStrategy struct{ fakeStrategy }
+
+func (parseErrStrategy) Parse([]byte) (strategy.ParsedDocument, error) {
+	return strategy.ParsedDocument{}, errors.New("parse failed")
+}
+
+type countMismatchStrategy struct{ fakeStrategy }
+
+func (countMismatchStrategy) Embed(context.Context, []storage.Chunk) ([][]float32, error) {
+	return [][]float32{}, nil // fewer vectors than chunks
+}
+
+type raggedStrategy struct{ fakeStrategy }
+
+func (raggedStrategy) Embed(_ context.Context, chunks []storage.Chunk) ([][]float32, error) {
+	out := make([][]float32, len(chunks))
+	for i := range chunks {
+		out[i] = []float32{1}
+	}
+	if len(out) > 1 {
+		out[1] = []float32{} // second vector has a different dimension
+	}
+	return out, nil
+}
+
+// --- tests ---
+
+func scannedDoc(path string) storage.Document {
+	return storage.Document{ID: 42, FileID: "1:100", AbsolutePath: path, Status: storage.DocumentStatusScanned}
+}
+
+func TestProcessByStatusError(t *testing.T) {
+	store := byStatusErrStore{&memoryStore{}}
+	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, false); err == nil {
+		t.Fatal("expected a DocumentsByStatus error")
+	}
+}
+
+func TestProcessScannedFailFastReturnsError(t *testing.T) {
+	store := &memoryStore{documents: []storage.Document{scannedDoc("/does/not/exist.md")}, nextID: 100}
+	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+		t.Fatal("expected a fail-fast read error")
+	}
+}
+
+func TestProcessScannedNoStrategy(t *testing.T) {
+	store := &memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, "x"))}, nextID: 100}
+	if err := Process(context.Background(), store, &memoryVectorStore{}, strategy.NewPool(), true); err == nil {
+		t.Fatal("expected a no-strategy error")
+	}
+}
+
+func TestProcessScannedParseError(t *testing.T) {
+	store := &memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, "x"))}, nextID: 100}
+	pool := strategy.NewPool(parseErrStrategy{})
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+		t.Fatal("expected a parse error")
+	}
+}
+
+func TestProcessScannedLoadExistingChunksError(t *testing.T) {
+	store := chunksErrStore{&memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, "abc"))}, nextID: 100}}
+	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+		t.Fatal("expected a load-existing-chunks error")
+	}
+}
+
+func TestProcessScannedReconcileError(t *testing.T) {
+	store := reconcileErrStore{&memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, "abc"))}, nextID: 100}}
+	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+		t.Fatal("expected a reconcile error")
+	}
+}
+
+func TestProcessScannedDeleteVectorsError(t *testing.T) {
+	store := &memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, "abc"))}, chunks: map[int64][]storage.Chunk{}, nextID: 100}
+	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
+	if err := Process(context.Background(), store, &deleteErrVectorStore{}, pool, true); err == nil {
+		t.Fatal("expected a delete-vectors error")
+	}
+}
+
+func TestProcessScannedUpdateStatusError(t *testing.T) {
+	store := updateStatusErrStore{&memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, "abc"))}, chunks: map[int64][]storage.Chunk{}, nextID: 100}}
+	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+		t.Fatal("expected an update-status error")
+	}
+}
+
+func TestProcessScannedChunksForEmbeddingError(t *testing.T) {
+	// A never-embedded document with existing chunks re-loads chunks in chunksForEmbedding; make
+	// that second lookup fail.
+	inner := &memoryStore{
+		documents: []storage.Document{scannedDoc(writeFile(t, "abcdef"))},
+		chunks:    map[int64][]storage.Chunk{42: {{ID: 7, DocumentID: 42, ChunkIndex: 0, Text: "old", ContentHash: "old"}}},
+		nextID:    100,
+	}
+	store := &secondChunksErrStore{memoryStore: inner}
+	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+		t.Fatal("expected a chunks-for-embedding error")
+	}
+}
+
+func TestProcessScannedAlreadyEmbeddedReindex(t *testing.T) {
+	// EmbeddedContentHash set: chunksForEmbedding returns only the newly inserted chunks.
+	doc := scannedDoc(writeFile(t, "abcdef"))
+	doc.EmbeddedContentHash = "prev"
+	store := &memoryStore{documents: []storage.Document{doc}, chunks: map[int64][]storage.Chunk{}, nextID: 100}
+	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, false); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+}
+
+func TestProcessScannedEmptyFileEmbedsNothing(t *testing.T) {
+	store := &memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, ""))}, chunks: map[int64][]storage.Chunk{}, nextID: 100}
+	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, false); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	if store.documents[0].Status != storage.DocumentStatusEmbedded {
+		t.Fatalf("expected embedded status, got %q", store.documents[0].Status)
+	}
+}
+
+func TestProcessEmbedCountMismatch(t *testing.T) {
+	store := &memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, "abc"))}, chunks: map[int64][]storage.Chunk{}, nextID: 100}
+	pool := strategy.NewPool(countMismatchStrategy{fakeStrategy{maxRunes: 3}})
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+		t.Fatal("expected an embedding-count mismatch error")
+	}
+}
+
+func TestProcessEmbedDimensionMismatch(t *testing.T) {
+	store := &memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, "abcdef"))}, chunks: map[int64][]storage.Chunk{}, nextID: 100}
+	pool := strategy.NewPool(raggedStrategy{fakeStrategy{maxRunes: 3}})
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+		t.Fatal("expected an embedding-dimension mismatch error")
+	}
+}
+
+func chunkedDoc(path string) storage.Document {
+	return storage.Document{ID: 42, FileID: "1:100", AbsolutePath: path, Status: storage.DocumentStatusChunked}
+}
+
+func TestProcessChunkedNoStrategy(t *testing.T) {
+	store := &memoryStore{documents: []storage.Document{chunkedDoc(writeFile(t, "abc"))}}
+	if err := Process(context.Background(), store, &memoryVectorStore{}, strategy.NewPool(), true); err == nil {
+		t.Fatal("expected a no-strategy error for the chunked pass")
+	}
+}
+
+func TestProcessChunkedLoadChunksError(t *testing.T) {
+	store := chunksErrStore{&memoryStore{documents: []storage.Document{chunkedDoc(writeFile(t, "abc"))}}}
+	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+		t.Fatal("expected a load-chunks error for the chunked pass")
+	}
+}
+
+func TestProcessChunkedEmbedError(t *testing.T) {
+	store := &memoryStore{
+		documents: []storage.Document{chunkedDoc(writeFile(t, "abc"))},
+		chunks:    map[int64][]storage.Chunk{42: {{ID: 1, DocumentID: 42, ChunkIndex: 0, Text: "abc"}}},
+	}
+	pool := strategy.NewPool(fakeStrategy{maxRunes: 3, embedErr: errors.New("embed boom")})
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+		t.Fatal("expected an embed error for the chunked pass")
+	}
+}

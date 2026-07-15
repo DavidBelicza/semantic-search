@@ -263,3 +263,21 @@ func TestCodeChunkEmptyReturnsNil(t *testing.T) {
 		t.Fatalf("expected nil chunks for empty parse, got %v %#v", err, chunks)
 	}
 }
+
+// TestSplitSourceUnknownExtensionFallsBackToFlat covers splitSource's nil-splitter branch: a
+// path whose extension is not in the registry has no family, so the whole file becomes one flat
+// section.
+func TestSplitSourceUnknownExtensionFallsBackToFlat(t *testing.T) {
+	sections := sectionsOf(t, "notes.unknownext", "some free text\nmore text")
+	if len(sections) != 1 || len(sections[0].Path) != 0 {
+		t.Fatalf("expected a single flat section for an unknown extension, got %#v", sections)
+	}
+}
+
+// TestTokenizeUnknownExtensionReturnsNil covers tokenize's nil-lexer branch, reached when the
+// Chroma matcher finds no lexer for the file name.
+func TestTokenizeUnknownExtensionReturnsNil(t *testing.T) {
+	if tokens := tokenize("mystery.zzz", "content"); tokens != nil {
+		t.Fatalf("expected nil tokens when no lexer matches, got %d", len(tokens))
+	}
+}

@@ -3,6 +3,8 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -401,5 +403,73 @@ func TestSleepBackoffCanceled(t *testing.T) {
 	cancel()
 	if err := sleepBackoff(ctx, time.Hour); err == nil {
 		t.Fatal("expected a context error")
+	}
+}
+
+// roundTripFunc adapts a function to an http.RoundTripper so tests can fake transport behavior
+// without a live server.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// errBody is a response body whose Read always fails, exercising the io.ReadAll error branch.
+type errBody struct{}
+
+func (errBody) Read([]byte) (int, error) { return 0, errors.New("read boom") }
+func (errBody) Close() error             { return nil }
+
+func TestEmbedOnceTransportError(t *testing.T) {
+	c := OpenAIClient{
+		BaseURL:    "http://example.invalid",
+		Model:      "m",
+		MaxRetries: 0,
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("dial failed")
+		})},
+	}
+	if _, err := c.Embed(context.Background(), []string{"x"}); err == nil {
+		t.Fatal("expected a transport error")
+	}
+}
+
+func TestEmbedOnceReadBodyError(t *testing.T) {
+	c := OpenAIClient{
+		BaseURL:    "http://example.invalid",
+		Model:      "m",
+		MaxRetries: 0,
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Body: errBody{}, Header: make(http.Header)}, nil
+		})},
+	}
+	if _, err := c.Embed(context.Background(), []string{"x"}); err == nil {
+		t.Fatal("expected a body read error")
+	}
+}
+
+func TestParseEmbeddingsReportsProviderError(t *testing.T) {
+	if _, err := parseEmbeddings([]byte(`{"error":"quota exceeded"}`), 1); err == nil ||
+		!strings.Contains(err.Error(), "quota exceeded") {
+		t.Fatalf("expected the provider error to surface, got %v", err)
+	}
+}
+
+func TestEmbedWithRetryStopsWhenContextCanceledDuringBackoff(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := OpenAIClient{
+		BaseURL:     "http://example.invalid",
+		Model:       "m",
+		MaxRetries:  3,
+		BackoffBase: time.Hour, // long enough that the canceled context wins the select
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			cancel() // trigger the retry, then make the backoff wait observe a canceled context
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Body:       io.NopCloser(strings.NewReader("unavailable")),
+				Header:     make(http.Header),
+			}, nil
+		})},
+	}
+	if _, err := c.Embed(ctx, []string{"x"}); err == nil {
+		t.Fatal("expected a context-canceled error from the backoff wait")
 	}
 }

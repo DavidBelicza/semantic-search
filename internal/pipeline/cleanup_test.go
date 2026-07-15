@@ -88,6 +88,40 @@ type errDeleteVectors struct{}
 
 func (errDeleteVectors) Delete(context.Context, []int64) error { return errors.New("vectors") }
 
+type errChunksStore struct{ fakeCleanupStore }
+
+func (e *errChunksStore) ChunksByDocumentID(context.Context, int64) ([]storage.Chunk, error) {
+	return nil, errors.New("chunks lookup failed")
+}
+
+func TestCleanupReportsChunkLookupError(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "gone.md")
+	store := &errChunksStore{fakeCleanupStore{
+		documents: []storage.Document{{ID: 1, AbsolutePath: missing}},
+	}}
+	if err := Cleanup(context.Background(), store, &fakeCleanupVectorStore{}, true); err == nil {
+		t.Fatal("expected a chunk-lookup error")
+	}
+}
+
+func TestCleanupReportsAmbiguousStatError(t *testing.T) {
+	// A regular file used as a path component makes os.Stat fail with ENOTDIR, which is not
+	// os.IsNotExist, so the document is left untouched and the error surfaces.
+	file := filepath.Join(t.TempDir(), "afile")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	notADir := filepath.Join(file, "child.md")
+	store := &fakeCleanupStore{documents: []storage.Document{{ID: 1, AbsolutePath: notADir}}}
+
+	if err := Cleanup(context.Background(), store, &fakeCleanupVectorStore{}, true); err == nil {
+		t.Fatal("expected an ambiguous stat error")
+	}
+	if len(store.deleted) != 0 {
+		t.Fatalf("a document with an ambiguous stat must not be deleted, got %v", store.deleted)
+	}
+}
+
 func TestCleanupPropagatesErrors(t *testing.T) {
 	ctx := context.Background()
 	missing := filepath.Join(t.TempDir(), "gone.md") // never created, so the file is missing
