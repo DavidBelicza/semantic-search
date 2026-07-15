@@ -105,14 +105,10 @@ func TestCleanupReportsChunkLookupError(t *testing.T) {
 }
 
 func TestCleanupReportsAmbiguousStatError(t *testing.T) {
-	// A regular file used as a path component makes os.Stat fail with ENOTDIR, which is not
+	// A NUL byte in the path makes os.Stat fail with EINVAL on every platform, which is not
 	// os.IsNotExist, so the document is left untouched and the error surfaces.
-	file := filepath.Join(t.TempDir(), "afile")
-	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	notADir := filepath.Join(file, "child.md")
-	store := &fakeCleanupStore{documents: []storage.Document{{ID: 1, AbsolutePath: notADir}}}
+	badPath := filepath.Join(t.TempDir(), "bad\x00name.md")
+	store := &fakeCleanupStore{documents: []storage.Document{{ID: 1, AbsolutePath: badPath}}}
 
 	if err := Cleanup(context.Background(), store, &fakeCleanupVectorStore{}, true); err == nil {
 		t.Fatal("expected an ambiguous stat error")
