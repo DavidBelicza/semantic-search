@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,7 +33,7 @@ func TestProcessScannedReconcilesEmbedsAndMarks(t *testing.T) {
 	vectorStore := &memoryVectorStore{}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
 
-	if err := Process(context.Background(), store, vectorStore, pool, false); err != nil {
+	if err := Process(context.Background(), store, vectorStore, pool, false, nil); err != nil {
 		t.Fatalf("process: %v", err)
 	}
 
@@ -58,7 +59,7 @@ func TestProcessScannedLeavesChunkedWhenEmbeddingFails(t *testing.T) {
 	}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3, embedErr: errors.New("boom")})
 
-	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, false); err == nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, false, nil); err == nil {
 		t.Fatal("expected embedding error")
 	}
 	if store.documents[0].Status != storage.DocumentStatusChunked {
@@ -78,7 +79,7 @@ func TestProcessChunkedEmbedsAndMarks(t *testing.T) {
 	vectorStore := &memoryVectorStore{}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
 
-	if err := Process(context.Background(), store, vectorStore, pool, false); err != nil {
+	if err := Process(context.Background(), store, vectorStore, pool, false, nil); err != nil {
 		t.Fatalf("process: %v", err)
 	}
 	if len(vectorStore.embeddings) != 2 {
@@ -100,7 +101,7 @@ func TestProcessScannedContinuesAfterErrorWhenNotFailFast(t *testing.T) {
 	}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
 
-	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, false); err == nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, false, nil); err == nil {
 		t.Fatal("expected an aggregated error for the missing file")
 	}
 	if store.documents[1].Status != storage.DocumentStatusEmbedded {
@@ -263,7 +264,7 @@ func TestProcessScannedReturnsVectorReplaceError(t *testing.T) {
 	}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
 
-	if err := Process(context.Background(), store, &replaceErrVectorStore{}, pool, false); err == nil {
+	if err := Process(context.Background(), store, &replaceErrVectorStore{}, pool, false, nil); err == nil {
 		t.Fatal("expected a vector replace error")
 	}
 }
@@ -277,7 +278,7 @@ func TestProcessScannedReturnsMarkEmbeddedError(t *testing.T) {
 	}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
 
-	if err := Process(context.Background(), markErrStore{inner}, &memoryVectorStore{}, pool, false); err == nil {
+	if err := Process(context.Background(), markErrStore{inner}, &memoryVectorStore{}, pool, false, nil); err == nil {
 		t.Fatal("expected a mark-embedded error")
 	}
 }
@@ -365,7 +366,7 @@ func scannedDoc(path string) storage.Document {
 func TestProcessByStatusError(t *testing.T) {
 	store := byStatusErrStore{&memoryStore{}}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
-	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, false); err == nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, false, nil); err == nil {
 		t.Fatal("expected a DocumentsByStatus error")
 	}
 }
@@ -373,14 +374,14 @@ func TestProcessByStatusError(t *testing.T) {
 func TestProcessScannedFailFastReturnsError(t *testing.T) {
 	store := &memoryStore{documents: []storage.Document{scannedDoc("/does/not/exist.md")}, nextID: 100}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
-	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true, nil); err == nil {
 		t.Fatal("expected a fail-fast read error")
 	}
 }
 
 func TestProcessScannedNoStrategy(t *testing.T) {
 	store := &memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, "x"))}, nextID: 100}
-	if err := Process(context.Background(), store, &memoryVectorStore{}, strategy.NewPool(), true); err == nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, strategy.NewPool(), true, nil); err == nil {
 		t.Fatal("expected a no-strategy error")
 	}
 }
@@ -388,7 +389,7 @@ func TestProcessScannedNoStrategy(t *testing.T) {
 func TestProcessScannedParseError(t *testing.T) {
 	store := &memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, "x"))}, nextID: 100}
 	pool := strategy.NewPool(parseErrStrategy{})
-	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true, nil); err == nil {
 		t.Fatal("expected a parse error")
 	}
 }
@@ -396,7 +397,7 @@ func TestProcessScannedParseError(t *testing.T) {
 func TestProcessScannedLoadExistingChunksError(t *testing.T) {
 	store := chunksErrStore{&memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, "abc"))}, nextID: 100}}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
-	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true, nil); err == nil {
 		t.Fatal("expected a load-existing-chunks error")
 	}
 }
@@ -404,7 +405,7 @@ func TestProcessScannedLoadExistingChunksError(t *testing.T) {
 func TestProcessScannedReconcileError(t *testing.T) {
 	store := reconcileErrStore{&memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, "abc"))}, nextID: 100}}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
-	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true, nil); err == nil {
 		t.Fatal("expected a reconcile error")
 	}
 }
@@ -412,7 +413,7 @@ func TestProcessScannedReconcileError(t *testing.T) {
 func TestProcessScannedDeleteVectorsError(t *testing.T) {
 	store := &memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, "abc"))}, chunks: map[int64][]storage.Chunk{}, nextID: 100}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
-	if err := Process(context.Background(), store, &deleteErrVectorStore{}, pool, true); err == nil {
+	if err := Process(context.Background(), store, &deleteErrVectorStore{}, pool, true, nil); err == nil {
 		t.Fatal("expected a delete-vectors error")
 	}
 }
@@ -420,7 +421,7 @@ func TestProcessScannedDeleteVectorsError(t *testing.T) {
 func TestProcessScannedUpdateStatusError(t *testing.T) {
 	store := updateStatusErrStore{&memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, "abc"))}, chunks: map[int64][]storage.Chunk{}, nextID: 100}}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
-	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true, nil); err == nil {
 		t.Fatal("expected an update-status error")
 	}
 }
@@ -435,7 +436,7 @@ func TestProcessScannedChunksForEmbeddingError(t *testing.T) {
 	}
 	store := &secondChunksErrStore{memoryStore: inner}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
-	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true, nil); err == nil {
 		t.Fatal("expected a chunks-for-embedding error")
 	}
 }
@@ -446,7 +447,7 @@ func TestProcessScannedAlreadyEmbeddedReindex(t *testing.T) {
 	doc.EmbeddedContentHash = "prev"
 	store := &memoryStore{documents: []storage.Document{doc}, chunks: map[int64][]storage.Chunk{}, nextID: 100}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
-	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, false); err != nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, false, nil); err != nil {
 		t.Fatalf("process: %v", err)
 	}
 }
@@ -454,7 +455,7 @@ func TestProcessScannedAlreadyEmbeddedReindex(t *testing.T) {
 func TestProcessScannedEmptyFileEmbedsNothing(t *testing.T) {
 	store := &memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, ""))}, chunks: map[int64][]storage.Chunk{}, nextID: 100}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
-	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, false); err != nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, false, nil); err != nil {
 		t.Fatalf("process: %v", err)
 	}
 	if store.documents[0].Status != storage.DocumentStatusEmbedded {
@@ -465,7 +466,7 @@ func TestProcessScannedEmptyFileEmbedsNothing(t *testing.T) {
 func TestProcessEmbedCountMismatch(t *testing.T) {
 	store := &memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, "abc"))}, chunks: map[int64][]storage.Chunk{}, nextID: 100}
 	pool := strategy.NewPool(countMismatchStrategy{fakeStrategy{maxRunes: 3}})
-	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true, nil); err == nil {
 		t.Fatal("expected an embedding-count mismatch error")
 	}
 }
@@ -473,7 +474,7 @@ func TestProcessEmbedCountMismatch(t *testing.T) {
 func TestProcessEmbedDimensionMismatch(t *testing.T) {
 	store := &memoryStore{documents: []storage.Document{scannedDoc(writeFile(t, "abcdef"))}, chunks: map[int64][]storage.Chunk{}, nextID: 100}
 	pool := strategy.NewPool(raggedStrategy{fakeStrategy{maxRunes: 3}})
-	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true, nil); err == nil {
 		t.Fatal("expected an embedding-dimension mismatch error")
 	}
 }
@@ -484,7 +485,7 @@ func chunkedDoc(path string) storage.Document {
 
 func TestProcessChunkedNoStrategy(t *testing.T) {
 	store := &memoryStore{documents: []storage.Document{chunkedDoc(writeFile(t, "abc"))}}
-	if err := Process(context.Background(), store, &memoryVectorStore{}, strategy.NewPool(), true); err == nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, strategy.NewPool(), true, nil); err == nil {
 		t.Fatal("expected a no-strategy error for the chunked pass")
 	}
 }
@@ -492,7 +493,7 @@ func TestProcessChunkedNoStrategy(t *testing.T) {
 func TestProcessChunkedLoadChunksError(t *testing.T) {
 	store := chunksErrStore{&memoryStore{documents: []storage.Document{chunkedDoc(writeFile(t, "abc"))}}}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3})
-	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true, nil); err == nil {
 		t.Fatal("expected a load-chunks error for the chunked pass")
 	}
 }
@@ -503,7 +504,45 @@ func TestProcessChunkedEmbedError(t *testing.T) {
 		chunks:    map[int64][]storage.Chunk{42: {{ID: 1, DocumentID: 42, ChunkIndex: 0, Text: "abc"}}},
 	}
 	pool := strategy.NewPool(fakeStrategy{maxRunes: 3, embedErr: errors.New("embed boom")})
-	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true); err == nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, pool, true, nil); err == nil {
 		t.Fatal("expected an embed error for the chunked pass")
+	}
+}
+
+// Every other test fits inside a single page.
+func TestProcessSpansMultiplePages(t *testing.T) {
+	const documents = processBatchSize*2 + 1
+
+	dir := t.TempDir()
+	store := &memoryStore{chunks: map[int64][]storage.Chunk{}, nextID: 1000}
+	for i := range documents {
+		path := filepath.Join(dir, fmt.Sprintf("note%d.md", i))
+		if err := os.WriteFile(path, []byte("abcdefg"), 0o644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
+		store.documents = append(store.documents, storage.Document{
+			ID:           int64(i + 1),
+			FileID:       fmt.Sprintf("1:%d", i),
+			AbsolutePath: path,
+			Status:       storage.DocumentStatusScanned,
+		})
+	}
+
+	var calls []progressCall
+	tracker := NewProgressTracker(recorder(&calls))
+	tracker.Start(PhaseIndexing, documents)
+
+	if err := Process(context.Background(), store, &memoryVectorStore{}, strategy.NewPool(fakeStrategy{maxRunes: 3}), true, tracker); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	for i, document := range store.documents {
+		if document.Status != storage.DocumentStatusEmbedded {
+			t.Fatalf("document %d: status %q, want embedded", i, document.Status)
+		}
+	}
+	last := calls[len(calls)-1]
+	if last != (progressCall{PhaseIndexing, documents, documents}) {
+		t.Fatalf("after process: got %+v, want {indexing %d %d}", last, documents, documents)
 	}
 }

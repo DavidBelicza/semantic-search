@@ -10,7 +10,7 @@ import (
 	"github.com/davidbelicza/semantic-search/core/strategy"
 )
 
-const processBatchSize = 1
+const processBatchSize = 100
 
 // ProcessStore is the metadata surface the process pipeline needs — a subset of
 // storage.Storage, which any injected store satisfies.
@@ -33,8 +33,8 @@ type ProcessVectorStore interface {
 // runs the strategy's parse → chunk → embed steps, and owns the reconciliation, status
 // transitions, and vector writes between them. Documents left in the chunked state (a
 // previous run that embedded partially) are then embedded.
-func Process(ctx context.Context, store ProcessStore, vectorStore ProcessVectorStore, pool strategy.Pool, failFast bool) error {
-	run := processor{store: store, vectorStore: vectorStore, pool: pool}
+func Process(ctx context.Context, store ProcessStore, vectorStore ProcessVectorStore, pool strategy.Pool, failFast bool, progress *ProgressTracker) error {
+	run := processor{store: store, vectorStore: vectorStore, pool: pool, progress: progress}
 
 	if err := run.byStatus(ctx, storage.DocumentStatusScanned, failFast, run.processScanned); err != nil {
 		return err
@@ -49,6 +49,7 @@ type processor struct {
 	store       ProcessStore
 	vectorStore ProcessVectorStore
 	pool        strategy.Pool
+	progress    *ProgressTracker
 }
 
 type documentHandler func(ctx context.Context, document storage.Document) error
@@ -207,6 +208,7 @@ func (p processor) markEmbedded(ctx context.Context, document storage.Document) 
 	if err := p.store.MarkDocumentEmbedded(ctx, document.FileID, document.ContentHash); err != nil {
 		return fmt.Errorf("mark document embedded %q: %w", document.AbsolutePath, err)
 	}
+	p.progress.Advance()
 
 	return nil
 }

@@ -93,6 +93,83 @@ decisions that advance or stop the flow.
 Document status machine: `indexed → scanned → chunked → embedded`. Unchanged files are
 short-circuited (fingerprint match) so they are never re-chunked or re-embedded.
 
+### Change detection — two tiers
+
+Deciding what to re-embed is cheap first, accurate second:
+
+1. **Size + mtime, at the upsert.** The walk only stats files; `UpsertDocuments` compares the
+   stored `file_size` / `modified_at_ns` against the incoming ones and resets status to
+   `indexed` only when either moved. An untouched file keeps its status (`embedded`) and is
+   therefore invisible to every later stage — it is never opened. This is what makes a re-scan
+   of a large tree fast, and it is why the indexing phase's `done` finishes below its total on
+   a re-run: nothing ever visits an untouched file, so nothing can count it.
+2. **SHA-256, in fingerprint.** A file the first tier flagged is read and hashed. If the hash
+   equals `embedded_content_hash`, the file was merely touched and is restored to `embedded`
+   without re-embedding.
+
+The gap: content that changes while size and mtime both stay identical is invisible. That
+takes deliberate mtime preservation (`rsync --times`, some restores); `rebuild` is the escape
+hatch.
+
+### File identity — what counts as "the same file"
+
+A document is keyed by `FileID` (`internal/fs`), which decides whether a file on disk is one
+already in the database. It is platform-dependent:
+
+- **Unix (macOS, Linux)** — device + inode. Identity survives a rename or move: the walk
+  refreshes the path on the existing row, size and mtime still match, and the document is left
+  untouched. Relocating files costs nothing, which is what the Cleanup note above relies on.
+- **Everything else, Windows included** — the absolute path
+  ([internal/fs/file_id_other.go](../internal/fs/file_id_other.go)), because Windows does not
+  expose device/inode through `os.FileInfo`.
+
+**Accepted behavior:** on Windows a relocated file is a new identity. It is rediscovered and
+registered as a new document, fully re-embedded, and the old path — now missing — is deleted
+by Cleanup along with its chunks and vectors. The end state is correct (the content is indexed
+exactly once, under its new path), but the move costs a full re-embed instead of nothing.
+Reorganizing a large corpus on Windows is therefore a long run, not a no-op. Windows does
+expose an inode-equivalent (`GetFileInformationByHandle`); it is not used, because it needs
+`golang.org/x/sys/windows` and a file handle per file rather than a bare stat.
+
+## Progress reporting
+
+`IndexOptions.OnProgress` reports `(phase, done, total)` as a run advances; it is called
+synchronously on the indexing goroutine, so a slow callback slows the run. The counters live
+in `internal/pipeline` (`ProgressTracker`), which the facade creates once per run and passes
+to all three pipelines.
+
+**The counters never touch the database.** The only total available for free is what the walk
+found, counted in memory, so that is what `indexing` reports. Each phase counts its own set,
+so `total` is per phase, not per run:
+
+| Phase | Covers | Total | A document is done when |
+|---|---|---|---|
+| `scanning` | walk + upsert | **0** — unknown until the walk ends | — |
+| `indexing` | fingerprint + Process | `len(files)` from the walk | its vectors are stored (`markEmbedded`), or fingerprint finds its content unchanged and skips it |
+| `cleanup` | Cleanup | **0** — the stored document set is only known to the database | it has been stat'ed |
+
+The phase boundary does not match the function boundary: `Index` opens `scanning`, then opens
+`indexing` itself before calling `fingerprint`, and `Process` keeps counting into the phase
+`Index` opened. `Cleanup` opens its own.
+
+### What `done` reaching `total` means
+
+`indexing`'s total is **files considered, not files needing work** — those are different
+numbers on a re-run, and the difference is by design:
+
+- **First run** — every file is new, so all of them are worked on and `done` reaches `total`.
+- **Re-run** — the upsert leaves untouched files at their existing status (see *Change
+  detection*), so they are invisible to `fingerprint` and `Process` and no pipeline ever
+  visits them. Nothing can count them. 12 changed files out of 100,000 gives
+  `indexing 12 of 100000`.
+- **Errors** — a failed document is left for the next run and never counted as finished, so
+  `indexing` also ends short when `FailFast` is off.
+
+Reporting files-needing-work instead would mean a `COUNT(*)` on `status`, because the
+classification happens inside the upsert's `ON CONFLICT` clause and its result exists only in
+the database. That is a deliberate trade: the counters stay free of queries, and `total` means
+"files looked at". See [examples/progress](../examples/progress).
+
 ## Storage
 
 The resource entities (`Document`, `Chunk`, `ChunkEmbedding`, `FileMetadata`, status

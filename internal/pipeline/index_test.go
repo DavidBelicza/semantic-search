@@ -46,7 +46,7 @@ func TestIndexDiscoversRegistersAndFingerprints(t *testing.T) {
 	}
 
 	pool := strategy.NewPool(markdown.NewMarkdownStrategy(general.NewGeneralStrategy(nil, nil)))
-	if err := pipeline.Index(context.Background(), store, pool, root, pipeline.Options{}, false); err != nil {
+	if err := pipeline.Index(context.Background(), store, pool, root, pipeline.Options{}, false, nil); err != nil {
 		t.Fatalf("index: %v", err)
 	}
 
@@ -110,10 +110,10 @@ func TestPipelineIndexProcessSearchCleanup(t *testing.T) {
 	embedder := stubEmbedder{dim: 8}
 	pool := strategy.NewPool(general.NewGeneralStrategy(model, embedder))
 
-	if err := pipeline.Index(ctx, store, pool, root, pipeline.Options{}, false); err != nil {
+	if err := pipeline.Index(ctx, store, pool, root, pipeline.Options{}, false, nil); err != nil {
 		t.Fatalf("index: %v", err)
 	}
-	if err := pipeline.Process(ctx, store, vectors, pool, false); err != nil {
+	if err := pipeline.Process(ctx, store, vectors, pool, false, nil); err != nil {
 		t.Fatalf("process: %v", err)
 	}
 
@@ -123,7 +123,7 @@ func TestPipelineIndexProcessSearchCleanup(t *testing.T) {
 	if err := os.Chtimes(keep, future, future); err != nil {
 		t.Fatal(err)
 	}
-	if err := pipeline.Index(ctx, store, pool, root, pipeline.Options{}, false); err != nil {
+	if err := pipeline.Index(ctx, store, pool, root, pipeline.Options{}, false, nil); err != nil {
 		t.Fatalf("reindex: %v", err)
 	}
 
@@ -139,7 +139,7 @@ func TestPipelineIndexProcessSearchCleanup(t *testing.T) {
 	if err := os.Remove(remove); err != nil {
 		t.Fatal(err)
 	}
-	if err := pipeline.Cleanup(ctx, store, vectors, false); err != nil {
+	if err := pipeline.Cleanup(ctx, store, vectors, false, nil); err != nil {
 		t.Fatalf("cleanup: %v", err)
 	}
 	remaining, err := store.DocumentsFromID(ctx, 0, 100)
@@ -175,7 +175,7 @@ func TestIndexFollowsSymlinksAndSkipsHidden(t *testing.T) {
 	}
 
 	pool := strategy.NewPool(markdown.NewMarkdownStrategy(general.NewGeneralStrategy(nil, nil)))
-	if err := pipeline.Index(ctx, store, pool, root, pipeline.Options{FollowSymlinks: true}, false); err != nil {
+	if err := pipeline.Index(ctx, store, pool, root, pipeline.Options{FollowSymlinks: true}, false, nil); err != nil {
 		t.Fatalf("index: %v", err)
 	}
 
@@ -256,7 +256,7 @@ func (s probeStrategy) CreateMetadata(ref strategy.FileRef) (storage.FileMetadat
 
 func TestIndexReturnsDiscoverError(t *testing.T) {
 	pool := strategy.NewPool(probeStrategy{})
-	err := pipeline.Index(context.Background(), &fakeIndexStore{}, pool, filepath.Join(t.TempDir(), "missing"), pipeline.Options{}, false)
+	err := pipeline.Index(context.Background(), &fakeIndexStore{}, pool, filepath.Join(t.TempDir(), "missing"), pipeline.Options{}, false, nil)
 	if err == nil {
 		t.Fatal("expected a discover error for a nonexistent root")
 	}
@@ -269,7 +269,7 @@ func TestIndexReturnsUpsertError(t *testing.T) {
 	}
 	pool := strategy.NewPool(probeStrategy{})
 	store := &fakeIndexStore{upsertErr: errors.New("upsert failed")}
-	if err := pipeline.Index(context.Background(), store, pool, dir, pipeline.Options{}, false); err == nil {
+	if err := pipeline.Index(context.Background(), store, pool, dir, pipeline.Options{}, false, nil); err == nil {
 		t.Fatal("expected an upsert error")
 	}
 }
@@ -291,7 +291,7 @@ func TestDiscoverSkipsHiddenFilesAndUnfollowedSymlinks(t *testing.T) {
 	store := &fakeIndexStore{}
 	// FollowSymlinks is false, so the symlink is stat'd as non-regular and skipped; the hidden
 	// file is skipped too. Only real.md is a regular claimed file.
-	if err := pipeline.Index(context.Background(), store, pool, dir, pipeline.Options{}, false); err != nil {
+	if err := pipeline.Index(context.Background(), store, pool, dir, pipeline.Options{}, false, nil); err != nil {
 		t.Fatalf("index: %v", err)
 	}
 }
@@ -302,7 +302,7 @@ func TestFileMetadataErrorsAbortDiscovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	pool := strategy.NewPool(probeStrategy{metaErr: errors.New("metadata failed")})
-	if err := pipeline.Index(context.Background(), &fakeIndexStore{}, pool, dir, pipeline.Options{}, false); err == nil {
+	if err := pipeline.Index(context.Background(), &fakeIndexStore{}, pool, dir, pipeline.Options{}, false, nil); err == nil {
 		t.Fatal("expected a CreateMetadata error to abort discovery")
 	}
 }
@@ -313,7 +313,7 @@ func TestFileInfoErrorOnFollowedDanglingSymlink(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 	pool := strategy.NewPool(probeStrategy{})
-	if err := pipeline.Index(context.Background(), &fakeIndexStore{}, pool, dir, pipeline.Options{FollowSymlinks: true}, false); err == nil {
+	if err := pipeline.Index(context.Background(), &fakeIndexStore{}, pool, dir, pipeline.Options{FollowSymlinks: true}, false, nil); err == nil {
 		t.Fatal("expected a stat error following a dangling symlink")
 	}
 }
@@ -321,7 +321,7 @@ func TestFileInfoErrorOnFollowedDanglingSymlink(t *testing.T) {
 func TestFingerprintReturnsByStatusError(t *testing.T) {
 	pool := strategy.NewPool(probeStrategy{})
 	store := &fakeIndexStore{byStatusErr: errors.New("by status failed")}
-	if err := pipeline.Index(context.Background(), store, pool, t.TempDir(), pipeline.Options{}, false); err == nil {
+	if err := pipeline.Index(context.Background(), store, pool, t.TempDir(), pipeline.Options{}, false, nil); err == nil {
 		t.Fatal("expected a DocumentsByStatus error")
 	}
 }
@@ -331,7 +331,7 @@ func TestFingerprintNoStrategyForDocument(t *testing.T) {
 		{ID: 1, FileID: "1", AbsolutePath: "/gone/file.md"},
 	}}
 	pool := strategy.NewPool() // empty: no strategy claims the document
-	if err := pipeline.Index(context.Background(), store, pool, t.TempDir(), pipeline.Options{}, true); err == nil {
+	if err := pipeline.Index(context.Background(), store, pool, t.TempDir(), pipeline.Options{}, true, nil); err == nil {
 		t.Fatal("expected a no-strategy error")
 	}
 }
@@ -355,7 +355,7 @@ func TestFingerprintDocumentBranches(t *testing.T) {
 	pool := strategy.NewPool(probeStrategy{fp: "H"})
 
 	// failFast false collects the missing-file error but still processes the others.
-	if err := pipeline.Index(context.Background(), store, pool, dir, pipeline.Options{}, false); err == nil {
+	if err := pipeline.Index(context.Background(), store, pool, dir, pipeline.Options{}, false, nil); err == nil {
 		t.Fatal("expected the collected read error")
 	}
 }
@@ -365,7 +365,7 @@ func TestFingerprintFailFastStopsOnFirstError(t *testing.T) {
 		{ID: 1, FileID: "1", AbsolutePath: "/gone/file.md"},
 	}}
 	pool := strategy.NewPool(probeStrategy{fp: "H"})
-	if err := pipeline.Index(context.Background(), store, pool, t.TempDir(), pipeline.Options{}, true); err == nil {
+	if err := pipeline.Index(context.Background(), store, pool, t.TempDir(), pipeline.Options{}, true, nil); err == nil {
 		t.Fatal("expected a fail-fast read error")
 	}
 }
@@ -381,7 +381,7 @@ func TestFingerprintUpdateHashError(t *testing.T) {
 		toFingerprint: []storage.Document{{ID: 1, FileID: "1", AbsolutePath: file, ContentHash: "old"}},
 	}
 	pool := strategy.NewPool(probeStrategy{fp: "new"})
-	if err := pipeline.Index(context.Background(), store, pool, dir, pipeline.Options{}, true); err == nil {
+	if err := pipeline.Index(context.Background(), store, pool, dir, pipeline.Options{}, true, nil); err == nil {
 		t.Fatal("expected an update-content-hash error")
 	}
 }
@@ -399,7 +399,7 @@ func TestMarkCheckpointError(t *testing.T) {
 			ModifiedAtNS: 2, ScannedModifiedAtNS: 2}},
 	}
 	pool := strategy.NewPool(probeStrategy{fp: "H"})
-	if err := pipeline.Index(context.Background(), store, pool, dir, pipeline.Options{}, true); err == nil {
+	if err := pipeline.Index(context.Background(), store, pool, dir, pipeline.Options{}, true, nil); err == nil {
 		t.Fatal("expected a checkpoint error")
 	}
 }

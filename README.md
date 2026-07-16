@@ -154,11 +154,13 @@ make lint        # golangci-lint
 
 ## Examples
 
-Runnable programs live in [`examples/`](examples), each a single `main` that indexes the sample
-files in [`examples/files`](examples/files) and searches them. They need an OpenAI-compatible
-embedding server on `http://127.0.0.1:1234` (e.g. LM Studio) serving EmbeddingGemma.
+Runnable programs live in [`examples/`](examples), each a single `main` built around the sample
+files in [`examples/files`](examples/files). They need an OpenAI-compatible embedding server on
+`http://127.0.0.1:1234` (e.g. LM Studio) serving EmbeddingGemma.
 
 - **basic**: index into on-disk SQLite and run a search.
+- **progress**: follow an index run with `IndexOptions.OnProgress`, printing how many of the
+  scanned files have been processed.
 - **searchconfig**: tune results with `SearchConfig` (task, minimum relevance, document and chunk limits).
 - **postgres**: the server-side setup on PostgreSQL with pgvector.
 
@@ -167,6 +169,7 @@ git clone https://github.com/DavidBelicza/semantic-search.git
 cd semantic-search
 
 go run ./examples/basic
+go run ./examples/progress
 go run ./examples/searchconfig
 ```
 
