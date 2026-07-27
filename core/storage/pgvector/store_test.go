@@ -159,3 +159,24 @@ func TestPgvectorMethodsErrorOnClosedStore(t *testing.T) {
 		t.Fatal("expected error: Delete on closed store")
 	}
 }
+
+func TestStoreMethodsErrorOnClosedDB(t *testing.T) {
+	store := testStore(t, 3, false)
+	if err := store.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	ctx := context.Background()
+
+	if err := store.EnsureSchema(ctx); err == nil {
+		t.Error("EnsureSchema: expected an error on a closed database")
+	}
+	if err := store.Delete(ctx, []int64{1}); err == nil {
+		t.Error("Delete: expected an error on a closed database")
+	}
+	if err := store.Replace(ctx, []storage.ChunkEmbedding{{ChunkID: 1, Vector: []float32{1, 0, 0}}}); err == nil {
+		t.Error("Replace: expected an error on a closed database")
+	}
+	if _, err := store.Search(ctx, []float32{1, 0, 0}, 5); err == nil {
+		t.Error("Search: expected an error on a closed database")
+	}
+}

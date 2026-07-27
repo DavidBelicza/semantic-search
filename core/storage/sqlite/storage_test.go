@@ -587,3 +587,56 @@ func TestSqliteMethodsErrorOnClosedStore(t *testing.T) {
 		t.Fatal("expected error: UpsertDocuments on closed store")
 	}
 }
+
+func TestStoreMethodsErrorOnClosedDB(t *testing.T) {
+	store := openTestStore(t)
+	if err := store.EnsureSchema(context.Background()); err != nil {
+		t.Fatalf("ensure schema: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	ctx := context.Background()
+
+	ids := []int64{1}
+	files := []storage.FileMetadata{{FileID: "f", AbsolutePath: "/a"}}
+	plan := storage.ChunkReconcilePlan{Insert: []storage.Chunk{{ChunkIndex: 0, Text: "x"}}}
+
+	checks := []struct {
+		name string
+		err  error
+	}{
+		{"EnsureSchema", store.EnsureSchema(ctx)},
+		{"UpsertDocuments", store.UpsertDocuments(ctx, files)},
+		{"UpdateDocumentContentHashAndStatus", store.UpdateDocumentContentHashAndStatus(ctx, "f", "h", "scanned")},
+		{"UpdateDocumentStatus", store.UpdateDocumentStatus(ctx, "f", "scanned")},
+		{"UpdateDocumentScanCheckpointAndStatus", store.UpdateDocumentScanCheckpointAndStatus(ctx, "f", "scanned")},
+		{"MarkDocumentEmbedded", store.MarkDocumentEmbedded(ctx, "f", "h")},
+		{"DeleteDocument", store.DeleteDocument(ctx, 1)},
+	}
+	for _, c := range checks {
+		if c.err == nil {
+			t.Errorf("%s: expected an error on a closed database", c.name)
+		}
+	}
+
+	queries := []struct {
+		name string
+		err  error
+	}{
+		{"DocumentsByStatus", second(store.DocumentsByStatus(ctx, "scanned", 0, 10))},
+		{"DocumentsFromID", second(store.DocumentsFromID(ctx, 0, 10))},
+		{"ApplyDocumentChunkReconcile", second(store.ApplyDocumentChunkReconcile(ctx, 1, plan))},
+		{"ChunkMetadataByIDs", second(store.ChunkMetadataByIDs(ctx, ids))},
+		{"ChunkDocumentIDs", second(store.ChunkDocumentIDs(ctx, ids))},
+		{"DocumentsByIDs", second(store.DocumentsByIDs(ctx, ids))},
+		{"ChunksByDocumentID", second(store.ChunksByDocumentID(ctx, 1))},
+	}
+	for _, c := range queries {
+		if c.err == nil {
+			t.Errorf("%s: expected an error on a closed database", c.name)
+		}
+	}
+}
+
+func second[T any](_ T, err error) error { return err }

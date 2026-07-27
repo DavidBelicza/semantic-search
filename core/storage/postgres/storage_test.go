@@ -241,3 +241,53 @@ func TestPostgresMethodsErrorOnClosedStore(t *testing.T) {
 		t.Fatal("expected error: UpsertDocuments")
 	}
 }
+
+func TestStoreMethodsErrorOnClosedDB(t *testing.T) {
+	store := testStore(t)
+	if err := store.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	ctx := context.Background()
+
+	ids := []int64{1}
+	files := []storage.FileMetadata{{FileID: "f", AbsolutePath: "/a"}}
+	plan := storage.ChunkReconcilePlan{Insert: []storage.Chunk{{ChunkIndex: 0, Text: "x"}}}
+
+	execs := []struct {
+		name string
+		err  error
+	}{
+		{"EnsureSchema", store.EnsureSchema(ctx)},
+		{"UpsertDocuments", store.UpsertDocuments(ctx, files)},
+		{"UpdateDocumentContentHashAndStatus", store.UpdateDocumentContentHashAndStatus(ctx, "f", "h", "scanned")},
+		{"UpdateDocumentStatus", store.UpdateDocumentStatus(ctx, "f", "scanned")},
+		{"UpdateDocumentScanCheckpointAndStatus", store.UpdateDocumentScanCheckpointAndStatus(ctx, "f", "scanned")},
+		{"MarkDocumentEmbedded", store.MarkDocumentEmbedded(ctx, "f", "h")},
+		{"DeleteDocument", store.DeleteDocument(ctx, 1)},
+	}
+	for _, c := range execs {
+		if c.err == nil {
+			t.Errorf("%s: expected an error on a closed database", c.name)
+		}
+	}
+
+	queries := []struct {
+		name string
+		err  error
+	}{
+		{"DocumentsByStatus", secondErr(store.DocumentsByStatus(ctx, "scanned", 0, 10))},
+		{"DocumentsFromID", secondErr(store.DocumentsFromID(ctx, 0, 10))},
+		{"ApplyDocumentChunkReconcile", secondErr(store.ApplyDocumentChunkReconcile(ctx, 1, plan))},
+		{"ChunkMetadataByIDs", secondErr(store.ChunkMetadataByIDs(ctx, ids))},
+		{"ChunkDocumentIDs", secondErr(store.ChunkDocumentIDs(ctx, ids))},
+		{"DocumentsByIDs", secondErr(store.DocumentsByIDs(ctx, ids))},
+		{"ChunksByDocumentID", secondErr(store.ChunksByDocumentID(ctx, 1))},
+	}
+	for _, c := range queries {
+		if c.err == nil {
+			t.Errorf("%s: expected an error on a closed database", c.name)
+		}
+	}
+}
+
+func secondErr[T any](_ T, err error) error { return err }
