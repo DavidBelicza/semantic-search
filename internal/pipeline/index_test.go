@@ -403,3 +403,19 @@ func TestMarkCheckpointError(t *testing.T) {
 		t.Fatal("expected a checkpoint error")
 	}
 }
+
+func TestSkipEmbeddedCheckpointError(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "e.md")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeIndexStore{
+		checkpointErr: errors.New("checkpoint failed"),
+		toFingerprint: []storage.Document{{ID: 1, FileID: "1", AbsolutePath: file, EmbeddedContentHash: "H"}},
+	}
+	pool := strategy.NewPool(probeStrategy{fp: "H"})
+	if err := pipeline.Index(context.Background(), store, pool, dir, pipeline.Options{}, true, nil); err == nil {
+		t.Fatal("expected a checkpoint error from skipEmbedded")
+	}
+}
