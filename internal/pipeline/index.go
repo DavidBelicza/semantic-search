@@ -19,7 +19,7 @@ import (
 
 const (
 	documentUpsertBatchSize = 500
-	fingerprintBatchSize    = 1
+	fingerprintBatchSize    = 100
 )
 
 // Options controls how the index pipeline walks the tree.
@@ -38,8 +38,11 @@ type IndexStore interface {
 }
 
 // Index is the "all files in one round" pipeline: walk the tree, register the documents a
-// strategy claims, then fingerprint the indexed ones to detect content changes.
-func Index(ctx context.Context, store IndexStore, pool strategy.Pool, rootPath string, options Options, failFast bool) error {
+// strategy claims, then fingerprint the indexed ones to detect content changes. progress may
+// be nil.
+func Index(ctx context.Context, store IndexStore, pool strategy.Pool, rootPath string, options Options, failFast bool, progress *ProgressTracker) error {
+	progress.Start(PhaseScanning, 0)
+
 	files, err := discover(pool, rootPath, options)
 	if err != nil {
 		return err
@@ -49,7 +52,9 @@ func Index(ctx context.Context, store IndexStore, pool strategy.Pool, rootPath s
 		return err
 	}
 
-	return fingerprint(ctx, store, pool, failFast)
+	progress.Start(PhaseIndexing, len(files))
+
+	return fingerprint(ctx, store, pool, failFast, progress)
 }
 
 func discover(pool strategy.Pool, root string, options Options) ([]storage.FileMetadata, error) {
@@ -157,7 +162,7 @@ func upsertInBatches(ctx context.Context, store IndexStore, files []storage.File
 // fingerprint walks the indexed documents, hashes changed ones via their strategy, and
 // advances their status. The status decisions (advance to scanned, restore to embedded)
 // are the pipeline's; the hashing is the strategy's.
-func fingerprint(ctx context.Context, store IndexStore, pool strategy.Pool, failFast bool) error {
+func fingerprint(ctx context.Context, store IndexStore, pool strategy.Pool, failFast bool, progress *ProgressTracker) error {
 	var errs []error
 	var afterID int64
 
@@ -172,7 +177,7 @@ func fingerprint(ctx context.Context, store IndexStore, pool strategy.Pool, fail
 
 		for _, document := range documents {
 			afterID = document.ID
-			err := fingerprintDocument(ctx, store, pool, document)
+			err := fingerprintDocument(ctx, store, pool, document, progress)
 			if err == nil {
 				continue
 			}
@@ -184,7 +189,7 @@ func fingerprint(ctx context.Context, store IndexStore, pool strategy.Pool, fail
 	}
 }
 
-func fingerprintDocument(ctx context.Context, store IndexStore, pool strategy.Pool, document storage.Document) error {
+func fingerprintDocument(ctx context.Context, store IndexStore, pool strategy.Pool, document storage.Document, progress *ProgressTracker) error {
 	if metadataMatchesCheckpoint(document) {
 		return markCheckpoint(ctx, store, document, storage.DocumentStatusScanned)
 	}
@@ -203,7 +208,7 @@ func fingerprintDocument(ctx context.Context, store IndexStore, pool strategy.Po
 	// Content matches what was already embedded (e.g. the file was only touched):
 	// restore embedded and skip re-processing.
 	if document.EmbeddedContentHash != "" && document.EmbeddedContentHash == hash {
-		return markCheckpoint(ctx, store, document, storage.DocumentStatusEmbedded)
+		return skipEmbedded(ctx, store, document, progress)
 	}
 	if document.HasHash && document.ContentHash == hash {
 		return markCheckpoint(ctx, store, document, storage.DocumentStatusScanned)
@@ -212,6 +217,15 @@ func fingerprintDocument(ctx context.Context, store IndexStore, pool strategy.Po
 	if err := store.UpdateDocumentContentHashAndStatus(ctx, document.FileID, hash, storage.DocumentStatusScanned); err != nil {
 		return fmt.Errorf("update scanned document %q: %w", document.AbsolutePath, err)
 	}
+
+	return nil
+}
+
+func skipEmbedded(ctx context.Context, store IndexStore, document storage.Document, progress *ProgressTracker) error {
+	if err := markCheckpoint(ctx, store, document, storage.DocumentStatusEmbedded); err != nil {
+		return err
+	}
+	progress.Advance()
 
 	return nil
 }

@@ -83,6 +83,11 @@ func NewEngine(config Config) (*Engine, error) {
 // are gone are pruned unless IndexOptions.KeepMissingFiles is set. The strategies (and any
 // resources they open, like the PDF extractor) are built here and released when indexing finishes.
 func (e *Engine) Index(ctx context.Context, rootPath string, options IndexOptions) error {
+	embedBatchSize, err := resolveEmbedBatchSize(options.EmbedBatchSize)
+	if err != nil {
+		return err
+	}
+
 	strategies, release, err := buildStrategies(e.factories, e.model, e.embedder)
 	if err != nil {
 		return err
@@ -95,11 +100,13 @@ func (e *Engine) Index(ctx context.Context, rootPath string, options IndexOption
 		FollowSymlinks: options.FollowSymlinks,
 	}
 
-	if err := pipeline.Index(ctx, e.store, pool, rootPath, walkOptions, options.FailFast); err != nil {
+	progress := pipeline.NewProgressTracker(options.OnProgress)
+
+	if err := pipeline.Index(ctx, e.store, pool, rootPath, walkOptions, options.FailFast, progress); err != nil {
 		return err
 	}
 
-	if err := pipeline.Process(ctx, e.store, e.vectorStore, pool, options.FailFast); err != nil {
+	if err := pipeline.Process(ctx, e.store, e.vectorStore, pool, options.FailFast, embedBatchSize, progress); err != nil {
 		return err
 	}
 
@@ -107,7 +114,20 @@ func (e *Engine) Index(ctx context.Context, rootPath string, options IndexOption
 		return nil
 	}
 
-	return pipeline.Cleanup(ctx, e.store, e.vectorStore, options.FailFast)
+	return pipeline.Cleanup(ctx, e.store, e.vectorStore, options.FailFast, progress)
+}
+
+// resolveEmbedBatchSize validates an optional embed batch size. A nil value means "use the
+// default" and is passed through as 0; a set value must be positive.
+func resolveEmbedBatchSize(size *int) (int, error) {
+	if size == nil {
+		return 0, nil
+	}
+	if *size <= 0 {
+		return 0, fmt.Errorf("embed batch size must be positive, got %d", *size)
+	}
+
+	return *size, nil
 }
 
 // Search embeds the query and returns the matching documents, most relevant first, each carrying
@@ -133,7 +153,31 @@ type IndexOptions struct {
 	// KeepMissingFiles keeps documents whose files no longer exist on disk. By default indexing
 	// removes them, along with their chunks and vectors.
 	KeepMissingFiles bool
+	// OnProgress, when set, is called as the run advances. It runs synchronously, so a slow
+	// callback slows the run down.
+	OnProgress IndexProgress
+	// EmbedBatchSize is how many chunks are buffered across documents before a batch is sent to
+	// the embedding server, and the cap on chunks per request. Leave it nil to use the default
+	// (50); set it to a positive value to override (1 embeds one chunk per request). A non-nil
+	// value of zero or less is rejected.
+	EmbedBatchSize *int
 }
+
+// IndexPhase names the stage an index run is currently in.
+type IndexPhase = pipeline.Phase
+
+const (
+	// PhaseScanning walks the tree and registers what it finds. No total.
+	PhaseScanning = pipeline.PhaseScanning
+	// PhaseIndexing reads, chunks, and embeds the files whose content changed. total is the
+	// files the walk found, so done finishes below it when only some of them changed.
+	PhaseIndexing = pipeline.PhaseIndexing
+	// PhaseCleanup removes documents whose files are gone. No total.
+	PhaseCleanup = pipeline.PhaseCleanup
+)
+
+// IndexProgress receives an index run's counters. total is 0 when the phase has none.
+type IndexProgress = pipeline.Progress
 
 // SearchConfig is the whole input to a search: the query and its optional knobs. It is defined
 // in core/search and re-exported here for a single-import public API.

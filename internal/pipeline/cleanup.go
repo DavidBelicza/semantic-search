@@ -26,10 +26,13 @@ type CleanupVectorStore interface {
 
 // Cleanup pages through every stored document and removes the ones whose file is confirmed missing,
 // along with their chunks and vectors. Run it after indexing, so a moved file (its path just
-// refreshed by the walk) is not mistaken for a deleted one.
-func Cleanup(ctx context.Context, store CleanupStore, vectorStore CleanupVectorStore, failFast bool) error {
+// refreshed by the walk) is not mistaken for a deleted one — which holds where identity survives
+// a move.
+func Cleanup(ctx context.Context, store CleanupStore, vectorStore CleanupVectorStore, failFast bool, progress *ProgressTracker) error {
 	var errs []error
 	var afterID int64
+
+	progress.Start(PhaseCleanup, 0)
 
 	for {
 		documents, err := store.DocumentsFromID(ctx, afterID, cleanupBatchSize)
@@ -43,6 +46,7 @@ func Cleanup(ctx context.Context, store CleanupStore, vectorStore CleanupVectorS
 		for _, document := range documents {
 			afterID = document.ID
 			err := cleanupDocument(ctx, store, vectorStore, document)
+			progress.Advance()
 			if err == nil {
 				continue
 			}

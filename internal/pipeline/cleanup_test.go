@@ -62,7 +62,7 @@ func TestCleanupDeletesOnlyMissingFiles(t *testing.T) {
 	}
 	vectors := &fakeCleanupVectorStore{}
 
-	if err := Cleanup(context.Background(), store, vectors, true); err != nil {
+	if err := Cleanup(context.Background(), store, vectors, true, nil); err != nil {
 		t.Fatalf("cleanup: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestCleanupReportsChunkLookupError(t *testing.T) {
 	store := &errChunksStore{fakeCleanupStore{
 		documents: []storage.Document{{ID: 1, AbsolutePath: missing}},
 	}}
-	if err := Cleanup(context.Background(), store, &fakeCleanupVectorStore{}, true); err == nil {
+	if err := Cleanup(context.Background(), store, &fakeCleanupVectorStore{}, true, nil); err == nil {
 		t.Fatal("expected a chunk-lookup error")
 	}
 }
@@ -110,7 +110,7 @@ func TestCleanupReportsAmbiguousStatError(t *testing.T) {
 	badPath := filepath.Join(t.TempDir(), "bad\x00name.md")
 	store := &fakeCleanupStore{documents: []storage.Document{{ID: 1, AbsolutePath: badPath}}}
 
-	if err := Cleanup(context.Background(), store, &fakeCleanupVectorStore{}, true); err == nil {
+	if err := Cleanup(context.Background(), store, &fakeCleanupVectorStore{}, true, nil); err == nil {
 		t.Fatal("expected an ambiguous stat error")
 	}
 	if len(store.deleted) != 0 {
@@ -122,7 +122,7 @@ func TestCleanupPropagatesErrors(t *testing.T) {
 	ctx := context.Background()
 	missing := filepath.Join(t.TempDir(), "gone.md") // never created, so the file is missing
 
-	if err := Cleanup(ctx, &errListStore{}, &fakeCleanupVectorStore{}, false); err == nil {
+	if err := Cleanup(ctx, &errListStore{}, &fakeCleanupVectorStore{}, false, nil); err == nil {
 		t.Fatal("expected a list error")
 	}
 
@@ -133,10 +133,10 @@ func TestCleanupPropagatesErrors(t *testing.T) {
 		}
 	}
 
-	if err := Cleanup(ctx, missingDoc(), errDeleteVectors{}, true); err == nil {
+	if err := Cleanup(ctx, missingDoc(), errDeleteVectors{}, true, nil); err == nil {
 		t.Fatal("expected a vector-delete error with failFast")
 	}
-	if err := Cleanup(ctx, &errDeleteStore{*missingDoc()}, &fakeCleanupVectorStore{}, false); err == nil {
+	if err := Cleanup(ctx, &errDeleteStore{*missingDoc()}, &fakeCleanupVectorStore{}, false, nil); err == nil {
 		t.Fatal("expected a document-delete error collected without failFast")
 	}
 }

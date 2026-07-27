@@ -258,6 +258,42 @@ func TestDocumentSearcherHydrationErrors(t *testing.T) {
 	}
 }
 
+func TestDocumentSearcherFiltersEverythingBelowMinRelevance(t *testing.T) {
+	store := &fakeSearchStore{
+		docByChunk: map[int64]int64{1: 42},
+		meta:       map[int64]storage.ChunkMetadata{1: {ChunkID: 1, Text: "a"}},
+		paths:      map[int64]string{42: "/x.md"},
+	}
+	hits := fakeVectorStore{hits: []storage.VectorHit{{ChunkID: 1, Distance: 0.1}}}
+
+	docs, err := NewDocumentSearcher(store, hits, fakeModel{}, fakeClient{}).
+		Search(context.Background(), search.SearchConfig{Query: "q", MinRelevance: 1.5})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(docs) != 0 {
+		t.Fatalf("expected no documents above MinRelevance, got %d", len(docs))
+	}
+}
+
+func TestDocumentSearcherSurvivorWithoutPath(t *testing.T) {
+	store := &fakeSearchStore{
+		docByChunk: map[int64]int64{1: 42},
+		meta:       map[int64]storage.ChunkMetadata{1: {ChunkID: 1, Text: "a"}},
+		paths:      map[int64]string{},
+	}
+	hits := fakeVectorStore{hits: []storage.VectorHit{{ChunkID: 1, Distance: 0.1}}}
+
+	docs, err := NewDocumentSearcher(store, hits, fakeModel{}, fakeClient{}).
+		Search(context.Background(), search.SearchConfig{Query: "q"})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(docs) != 1 || docs[0].AbsolutePath != "" || docs[0].FileName != "" {
+		t.Fatalf("expected one document with no path, got %#v", docs)
+	}
+}
+
 type partialMappingStore struct{ *fakeSearchStore }
 
 // ChunkDocumentIDs returns a mapping only for chunk 1, so chunk 2 is an orphan hit that

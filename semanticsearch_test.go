@@ -116,6 +116,30 @@ func TestEngineIndexAndSearch(t *testing.T) {
 	}
 }
 
+func TestEngineIndexRejectsNonPositiveEmbedBatchSize(t *testing.T) {
+	engine := newTestEngine(t, NewTextStrategy())
+
+	for _, size := range []int{0, -1} {
+		size := size
+		if err := engine.Index(context.Background(), t.TempDir(), IndexOptions{EmbedBatchSize: &size}); err == nil {
+			t.Fatalf("EmbedBatchSize %d: expected an error", size)
+		}
+	}
+}
+
+func TestEngineIndexAcceptsPositiveEmbedBatchSize(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("The vacation policy grants fifteen paid days."), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	engine := newTestEngine(t, NewTextStrategy())
+	size := 1
+	if err := engine.Index(context.Background(), dir, IndexOptions{EmbedBatchSize: &size}); err != nil {
+		t.Fatalf("index with EmbedBatchSize 1: %v", err)
+	}
+}
+
 func TestEngineIndexPrunesMissingFilesByDefault(t *testing.T) {
 	dir := t.TempDir()
 	keep := filepath.Join(dir, "keep.txt")
@@ -240,6 +264,40 @@ func TestNewSQLiteVectorStorageOpens(t *testing.T) {
 		t.Fatalf("open sqlite-vec storage: %v", err)
 	}
 	defer store.Close()
+}
+
+func TestNewSQLiteStorageReadOnlySchemaError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("read-only file permissions are not enforced for root")
+	}
+	path := filepath.Join(t.TempDir(), "readonly.db")
+	if err := os.WriteFile(path, nil, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewSQLiteStorage(context.Background(), path); err == nil {
+		t.Fatal("expected an error preparing the schema on a read-only database")
+	}
+}
+
+func TestNewPostgresStorageUnreachableErrors(t *testing.T) {
+	dsn := "postgres://u:p@127.0.0.1:1/db?sslmode=disable&connect_timeout=1"
+	if _, err := NewPostgresStorage(context.Background(), dsn); err == nil {
+		t.Fatal("expected an error preparing an unreachable Postgres store")
+	}
+}
+
+func TestNewPostgresVectorStorageRejectsBadDimensions(t *testing.T) {
+	dsn := "postgres://u:p@127.0.0.1:1/db?sslmode=disable&connect_timeout=1"
+	if _, err := NewPostgresVectorStorage(context.Background(), dsn, 0, PostgresKNN); err == nil {
+		t.Fatal("expected an error for non-positive dimensions")
+	}
+}
+
+func TestNewPostgresVectorStorageUnreachableErrors(t *testing.T) {
+	dsn := "postgres://u:p@127.0.0.1:1/db?sslmode=disable&connect_timeout=1"
+	if _, err := NewPostgresVectorStorage(context.Background(), dsn, 8, PostgresHNSW); err == nil {
+		t.Fatal("expected an error preparing an unreachable pgvector store")
+	}
 }
 
 func TestNewModelPredefinedConstants(t *testing.T) {
