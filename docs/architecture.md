@@ -74,8 +74,9 @@ Embed(ctx, chunks) ([][]float32, error)
 
 Markdown, PDF, Code, and DOCX **embed** `GeneralStrategy` (Go composition, not inheritance), reusing its
 methods without proxy code and overriding only what their format needs. The embedder is
-injected, because embedding is a per-file operation the strategy owns. A `Pool` holds the
-strategies; `Pool.For(path)` returns the first that claims a file.
+injected, because embedding is an operation the strategy owns — though the pipeline batches it
+across files (see *Embedding*). A `Pool` holds the strategies; `Pool.For(path)` returns the
+first that claims a file.
 
 ## Pipelines — the flow between files
 
@@ -84,8 +85,9 @@ decisions that advance or stop the flow.
 
 - **Index** — walk the tree, ask the pool which strategy claims each file, register the
   claimed ones, then fingerprint the indexed documents to detect content changes.
-- **Process** — for each scanned document, read the bytes and run `Parse → Chunk → Embed`;
-  between those it reconciles chunks, writes vectors, and updates status.
+- **Process** — for each scanned document, read the bytes, run `Parse → Chunk`, and reconcile
+  its chunks, then buffer them for embedding. Chunks are embedded in batches across documents
+  (see *Embedding*); a batch's vectors are written and its documents marked embedded together.
 - **Cleanup** — page through the stored documents and remove those whose file no longer exists
   (with their chunks and vectors). It runs after indexing, when the walk has refreshed the paths,
   so a moved file is not mistaken for a deleted one; it is skipped when `KeepMissingFiles` is set.
@@ -198,6 +200,26 @@ is the transport client speaking the OpenAI-compatible API. Keeping them separat
 same client serve any model. The default model is `EmbeddingGemma-300m-qat` (768-dim); its
 `BuildData`/`BuildQuery` apply the templates documents and queries need — omitting them badly
 degrades ranking.
+
+### Batching (index side)
+
+Chunks are not sent to the server one document at a time. The process pipeline buffers each
+document's chunks (`embedBuffer` in `internal/pipeline`) and flushes once the buffer holds at
+least `EmbedBatchSize` chunks, so chunks from several small files travel in one request. The
+size is `IndexOptions.EmbedBatchSize` (default 50; must be positive if set — 1 sends one chunk
+per request); it is both the flush threshold and the cap on chunks per request.
+
+Rules that fall out of it:
+
+- **Whole documents only.** A batch always contains complete documents, so a document is
+  marked embedded all-or-nothing (no per-document pending state). A batch can therefore
+  overshoot the size by up to one document, and a single document larger than the size is its
+  own batch.
+- **Requests are capped.** A flushed batch — which may exceed the size from the overshoot, or
+  be one large document — is sent in requests of at most `EmbedBatchSize` chunks, then written
+  in a single vector store call, then its documents are marked embedded together.
+- **A batch succeeds or fails as a unit.** A failed batch leaves its documents in the
+  `chunked` state for the next run to retry; there is no per-document fallback.
 
 ## Search — query to documents
 

@@ -113,7 +113,7 @@ func TestPipelineIndexProcessSearchCleanup(t *testing.T) {
 	if err := pipeline.Index(ctx, store, pool, root, pipeline.Options{}, false, nil); err != nil {
 		t.Fatalf("index: %v", err)
 	}
-	if err := pipeline.Process(ctx, store, vectors, pool, false, nil); err != nil {
+	if err := pipeline.Process(ctx, store, vectors, pool, false, 0, nil); err != nil {
 		t.Fatalf("process: %v", err)
 	}
 

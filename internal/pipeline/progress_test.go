@@ -81,7 +81,7 @@ func TestProcessAdvancesProgressOnEmbedded(t *testing.T) {
 	tracker := NewProgressTracker(recorder(&calls))
 	tracker.Start(PhaseIndexing, 1)
 
-	if err := Process(context.Background(), store, &memoryVectorStore{}, strategy.NewPool(fakeStrategy{maxRunes: 3}), false, tracker); err != nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, strategy.NewPool(fakeStrategy{maxRunes: 3}), false, 0, tracker); err != nil {
 		t.Fatalf("process: %v", err)
 	}
 
@@ -103,7 +103,7 @@ func TestProcessDoesNotAdvanceProgressOnFailure(t *testing.T) {
 	tracker := NewProgressTracker(recorder(&calls))
 	tracker.Start(PhaseIndexing, 1)
 
-	if err := Process(context.Background(), store, &memoryVectorStore{}, strategy.NewPool(fakeStrategy{maxRunes: 3}), false, tracker); err == nil {
+	if err := Process(context.Background(), store, &memoryVectorStore{}, strategy.NewPool(fakeStrategy{maxRunes: 3}), false, 0, tracker); err == nil {
 		t.Fatal("process: want an error for a missing file")
 	}
 

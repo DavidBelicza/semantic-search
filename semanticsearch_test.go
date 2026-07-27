@@ -116,6 +116,30 @@ func TestEngineIndexAndSearch(t *testing.T) {
 	}
 }
 
+func TestEngineIndexRejectsNonPositiveEmbedBatchSize(t *testing.T) {
+	engine := newTestEngine(t, NewTextStrategy())
+
+	for _, size := range []int{0, -1} {
+		size := size
+		if err := engine.Index(context.Background(), t.TempDir(), IndexOptions{EmbedBatchSize: &size}); err == nil {
+			t.Fatalf("EmbedBatchSize %d: expected an error", size)
+		}
+	}
+}
+
+func TestEngineIndexAcceptsPositiveEmbedBatchSize(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("The vacation policy grants fifteen paid days."), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	engine := newTestEngine(t, NewTextStrategy())
+	size := 1
+	if err := engine.Index(context.Background(), dir, IndexOptions{EmbedBatchSize: &size}); err != nil {
+		t.Fatalf("index with EmbedBatchSize 1: %v", err)
+	}
+}
+
 func TestEngineIndexPrunesMissingFilesByDefault(t *testing.T) {
 	dir := t.TempDir()
 	keep := filepath.Join(dir, "keep.txt")
