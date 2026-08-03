@@ -24,6 +24,7 @@ import (
 	"github.com/davidbelicza/semantic-search/core/strategy/code"
 	"github.com/davidbelicza/semantic-search/core/strategy/docx"
 	"github.com/davidbelicza/semantic-search/core/strategy/general"
+	"github.com/davidbelicza/semantic-search/core/strategy/html"
 	"github.com/davidbelicza/semantic-search/core/strategy/markdown"
 	"github.com/davidbelicza/semantic-search/core/strategy/pdf"
 	"github.com/davidbelicza/semantic-search/internal/pipeline"
@@ -411,6 +412,16 @@ func NewPDFStrategy() StrategyFactory {
 			}
 
 			return pdf.NewPDFStrategy(general.NewGeneralStrategy(model, embedder), extractor), extractor.Close, nil
+		},
+	}
+}
+
+// NewHTMLStrategy registers the HTML strategy.
+func NewHTMLStrategy() StrategyFactory {
+	return StrategyFactory{
+		Extensions: []string{".html", ".htm", ".xhtml"},
+		Build: func(model strategy.EmbeddingModel, embedder strategy.AiClient) (strategy.Strategy, func() error, error) {
+			return html.NewHTMLStrategy(general.NewGeneralStrategy(model, embedder)), nil, nil
 		},
 	}
 }
