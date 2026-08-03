@@ -27,6 +27,18 @@ For each section:
 Each chunk records a content hash of `title + "\n" + text`, used for change detection during
 reconciliation.
 
+## The shared sectionizer (`strategy/general`)
+
+Every heading-based format (Markdown, PDF, DOCX, HTML) assembles its sections with the same
+`Sectionizer`: it is fed a stream of headings and body paragraphs, and keeps the heading stack
+so each section carries its full path.
+
+A heading that never receives body text is emitted as its own section, with the heading text
+as the body, rather than being dropped — otherwise a document whose prose sits in its headings
+(lab reports, spec lists, link indexes) would index almost nothing. A heading that only
+introduces a deeper one is left to its children, so `# A` / `## B` yields one section
+(`[A B]`, body `B`) instead of a redundant section per level.
+
 ## General (base)
 
 One section from the whole file, split into paragraphs, budget 350 / overlap 50. This is the
@@ -45,6 +57,15 @@ relative to the body font, text ordered top-to-bottom in reading order, repeated
 headers/footers stripped, and hyphenated line breaks rejoined — producing sections. It then
 inherits the general chunk config (paragraphs, 350 / 50). See
 [research/pdf-extraction-engine.md](research/pdf-extraction-engine.md).
+
+Assembling runs into lines is where most of the accuracy lives, because a PDF encodes
+positioned glyphs, not lines. Runs are grouped by baseline within a tolerance rather than by an
+exact position: a glyph's reported top depends on its shape (an `i` sits higher than an `o`),
+so matching exactly would split one line into a fragment per glyph height. A line's runs are
+then concatenated directly — PDFium reports the spaces a PDF actually encodes, so inserting a
+separator would space out every letter of the documents that emit per-character runs — with a
+space added only across a real word gap. A run that repeats the previous one at an overlapping
+position is dropped: some PDFs fake bold by drawing the same glyphs twice.
 
 ## Code (`strategy/code`)
 
@@ -82,6 +103,27 @@ the current section. This produces the same `Section{Path, Body}` structure as M
 DOCX overrides only `Claims` and `Parse` and inherits the general paragraph chunker (350 / 50)
 — chunks are titled with their full heading path (`Guide > Payments`). Tables are linearized
 into the surrounding section; headers/footers and footnotes are skipped.
+
+## HTML (`strategy/html`)
+
+Parsed with `golang.org/x/net/html`, a tolerant parser: malformed markup is repaired the way a
+browser would, so parsing effectively never fails. Only text nodes are read, so tags never
+reach the index.
+
+The tree is flattened into a stream of headings and paragraphs: `<h1>`-`<h6>` push onto the
+shared heading stack, block elements separate paragraphs, and inline elements concatenate
+without an inserted space (`<b>bo</b><i>ld</i>` stays `bold`). Whitespace runs collapse to a
+single space — including the decoded non-breaking space, so it does not survive as a
+look-alike character — while `<pre>` is kept verbatim. Entities are decoded by the parser.
+
+Two subtrees never contribute: `script`, `style`, `noscript`, `template`, `svg`, `canvas`, and
+`head` are never prose, and `nav`, `footer`, and `aside` are page furniture repeated on every
+page. `<header>` is kept, because it often wraps an article's own title.
+
+The indexed subtree is `<main>` when present, else a lone `<article>`, else the body — a page
+with several articles is a listing, not a single document, so its first article is not the
+root. Like DOCX, HTML overrides only `Claims` and `Parse` and inherits the general paragraph
+chunker (350 / 50).
 
 ## Token estimation
 

@@ -73,6 +73,7 @@ on disk or in memory) and as a server-side knowledge base (using PostgreSQL and 
 | Plain text | `.txt`, `.text`, `.log`, `.rst`, `.org`, `.adoc` | Split into overlapping paragraphs |
 | Code | `.go`, `.js`, `.ts`, `.jsx`, `.tsx`, `.py`, `.php`, `.java`, `.rb`, `.rs`, `.c`, `.h`, `.cpp`, `.hpp`, `.cs`, `.sh`, `.sql` | One section per function or class, titled with its full path |
 | DOCX | `.docx` | Split by Word heading styles |
+| HTML | `.html`, `.htm`, `.xhtml` | Text extracted from the HTML and split by `<h1>`-`<h6>` headings, with scripts, styles, and navigation dropped |
 
 ## How it works
 
@@ -225,6 +226,7 @@ func main() {
 			semanticsearch.NewPDFStrategy(),
 			semanticsearch.NewCodeStrategy(),
 			semanticsearch.NewDocxStrategy(),
+			semanticsearch.NewHTMLStrategy(),
 			semanticsearch.NewTextStrategy(),
 		},
 	})
