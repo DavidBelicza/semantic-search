@@ -29,9 +29,9 @@ func (NomicModel) Name() string { return NomicModelName }
 
 func (NomicModel) Dimensions() int { return NomicModelDimensions }
 
-// BuildData formats a chunk for indexing with Nomic's document prefix.
+// BuildData formats a chunk's heading path and text with Nomic's document prefix.
 func (NomicModel) BuildData(chunk storage.Chunk) string {
-	return "search_document: " + chunk.Text
+	return "search_document: " + titledText(chunk)
 }
 
 // BuildQuery formats a search query with Nomic's task prefix. The task type is the prefix

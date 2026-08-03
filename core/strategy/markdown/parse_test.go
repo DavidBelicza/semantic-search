@@ -26,3 +26,16 @@ func TestSplitMarkdownPartsSkipsEmptyRuns(t *testing.T) {
 		t.Fatalf("expected two trimmed parts, got %#v", parts)
 	}
 }
+
+// TestMarkdownHeadingsWithoutBodyAreStillIndexed covers a note whose prose sits in its
+// headings: the deepest heading becomes the section text rather than being dropped.
+func TestMarkdownHeadingsWithoutBodyAreStillIndexed(t *testing.T) {
+	sections := splitSections("# Alpha\n\n## Beta\n")
+
+	if len(sections) != 1 {
+		t.Fatalf("expected one section, got %#v", sections)
+	}
+	if got := sections[0]; len(got.Path) != 2 || got.Body != "Beta" {
+		t.Fatalf("expected the leaf heading as the body, got %#v", got)
+	}
+}

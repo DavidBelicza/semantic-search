@@ -18,7 +18,7 @@ func TestQwen3SmallModelMetadata(t *testing.T) {
 
 func TestQwen3SmallModelBuildData(t *testing.T) {
 	got := Qwen3SmallModel{}.BuildData(storage.Chunk{Title: "Payments", Text: "pay the invoice"})
-	if got != "pay the invoice" {
+	if got != "Payments\npay the invoice" {
 		t.Fatalf("build data mismatch: %q", got)
 	}
 }

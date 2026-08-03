@@ -20,9 +20,9 @@ func (m GeneralModel) Name() string { return m.name }
 
 func (m GeneralModel) Dimensions() int { return m.dimensions }
 
-// BuildData embeds the chunk's text as-is, without the title or any prompt template.
+// BuildData embeds the chunk's heading path and text, with no model-specific template.
 func (GeneralModel) BuildData(chunk storage.Chunk) string {
-	return chunk.Text
+	return titledText(chunk)
 }
 
 // BuildQuery embeds the query unchanged. A template-free model has no task template, so a

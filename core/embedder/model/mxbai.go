@@ -24,9 +24,9 @@ func (MxbaiLargeModel) Name() string { return MxbaiLargeModelName }
 
 func (MxbaiLargeModel) Dimensions() int { return MxbaiLargeModelDimensions }
 
-// BuildData embeds the chunk's text as-is; mxbai uses no document-side prefix.
+// BuildData embeds the chunk's heading path and text; mxbai uses no document-side prefix.
 func (MxbaiLargeModel) BuildData(chunk storage.Chunk) string {
-	return chunk.Text
+	return titledText(chunk)
 }
 
 // BuildQuery prepends mxbai's retrieval instruction to the query. mxbai embeds queries in a

@@ -8,6 +8,7 @@ import (
 	gtext "github.com/yuin/goldmark/text"
 
 	"github.com/davidbelicza/semantic-search/core/strategy"
+	"github.com/davidbelicza/semantic-search/core/strategy/general"
 	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
 
@@ -23,18 +24,14 @@ func splitSections(source string) []strategy.Section {
 		return wholeAsSection(source)
 	}
 
-	sections := preambleSection(lines, marks[0].line)
-	var stack []textproc.HeadingEntry
+	sections := general.NewSectionizer("\n\n")
+	sections.AddBody(preambleBody(lines, marks[0].line))
 	for i, mark := range marks {
-		stack = textproc.PushHeading(stack, mark.level, headingTextFromLine(lines[mark.line]))
-		body := strings.TrimSpace(strings.Join(lines[mark.line+1:sectionEnd(marks, i, len(lines))], "\n"))
-		if body == "" {
-			continue
-		}
-		sections = append(sections, strategy.Section{Path: textproc.PathOf(stack), Body: body})
+		sections.AddHeading(mark.level, headingTextFromLine(lines[mark.line]))
+		sections.AddBody(strings.TrimSpace(strings.Join(lines[mark.line+1:sectionEnd(marks, i, len(lines))], "\n")))
 	}
 
-	return sections
+	return sections.Sections()
 }
 
 func wholeAsSection(source string) []strategy.Section {
@@ -46,17 +43,12 @@ func wholeAsSection(source string) []strategy.Section {
 	return []strategy.Section{{Body: body}}
 }
 
-func preambleSection(lines []string, firstHeadingLine int) []strategy.Section {
+func preambleBody(lines []string, firstHeadingLine int) string {
 	if firstHeadingLine <= 0 {
-		return nil
+		return ""
 	}
 
-	body := strings.TrimSpace(strings.Join(lines[:firstHeadingLine], "\n"))
-	if body == "" {
-		return nil
-	}
-
-	return []strategy.Section{{Body: body}}
+	return strings.TrimSpace(strings.Join(lines[:firstHeadingLine], "\n"))
 }
 
 func sectionEnd(marks []headingMark, index int, lineCount int) int {

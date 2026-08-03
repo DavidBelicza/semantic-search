@@ -8,8 +8,12 @@ import (
 	"golang.org/x/net/html"
 
 	"github.com/davidbelicza/semantic-search/core/strategy"
+	"github.com/davidbelicza/semantic-search/core/strategy/general"
 	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
+
+// paragraphSeparator joins the paragraphs of one section.
+const paragraphSeparator = "\n\n"
 
 // extractSections parses the markup and turns its heading-structured content into sections.
 func extractSections(r io.Reader) ([]strategy.Section, error) {
@@ -188,65 +192,14 @@ func collectText(node *html.Node, out *strings.Builder) {
 }
 
 func sectionsFromBlocks(blocks []block) []strategy.Section {
-	sections := &sectionizer{}
+	sections := general.NewSectionizer(paragraphSeparator)
 	for _, item := range blocks {
 		if item.level > 0 {
-			sections.addHeading(item.level, item.text)
+			sections.AddHeading(item.level, item.text)
 			continue
 		}
-		sections.addBody(item.text)
+		sections.AddBody(item.text)
 	}
 
-	return sections.result()
-}
-
-// sectionizer assembles sections from a stream of headings and body paragraphs, using the
-// shared heading stack so each section carries its full heading path.
-type sectionizer struct {
-	stack        []textproc.HeadingEntry
-	sections     []strategy.Section
-	body         strings.Builder
-	pending      string
-	pendingLevel int
-}
-
-func (s *sectionizer) addHeading(level int, text string) {
-	s.close(level)
-	s.stack = textproc.PushHeading(s.stack, level, text)
-	s.pending = text
-	s.pendingLevel = level
-}
-
-func (s *sectionizer) addBody(text string) {
-	s.pending = ""
-	if s.body.Len() > 0 {
-		s.body.WriteString("\n\n")
-	}
-	s.body.WriteString(text)
-}
-
-// close ends the open section. A heading that never received body text is emitted on its own
-// rather than dropped, so a page whose prose sits in its headings is still indexed; a heading
-// that only introduces deeper ones is left to its children.
-func (s *sectionizer) close(level int) {
-	body := strings.TrimSpace(s.body.String())
-	s.body.Reset()
-	if body != "" {
-		s.emit(body)
-		return
-	}
-	if s.pending != "" && level <= s.pendingLevel {
-		s.emit(s.pending)
-	}
-
-	s.pending = ""
-}
-
-func (s *sectionizer) emit(body string) {
-	s.sections = append(s.sections, strategy.Section{Path: textproc.PathOf(s.stack), Body: body})
-}
-
-func (s *sectionizer) result() []strategy.Section {
-	s.close(1)
-	return s.sections
+	return sections.Sections()
 }

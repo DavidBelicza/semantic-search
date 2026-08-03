@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/davidbelicza/semantic-search/core/strategy"
+	"github.com/davidbelicza/semantic-search/core/strategy/general"
 	"github.com/davidbelicza/semantic-search/internal/textproc"
 )
 
@@ -172,28 +173,25 @@ func detectBodyFontSize(lines []textLine) float64 {
 func assembleSections(lines []textLine, baseline float64) []strategy.Section {
 	levels := headingLevelsBySize(lines, baseline)
 
-	var sections []strategy.Section
-	var stack []textproc.HeadingEntry
-	var body []string
-
-	flush := func() {
-		joined := joinHyphenatedLineBreaks(strings.TrimSpace(strings.Join(body, "\n")))
-		if joined != "" {
-			sections = append(sections, strategy.Section{Path: textproc.PathOf(stack), Body: joined})
-		}
-		body = nil
-	}
-
+	sections := general.NewSectionizer("\n")
 	for _, line := range lines {
 		level, isHeading := levels[roundFontSize(line.fontSize)]
 		if !isHeading {
-			body = append(body, line.text)
+			sections.AddBody(line.text)
 			continue
 		}
-		flush()
-		stack = textproc.PushHeading(stack, level, line.text)
+		sections.AddHeading(level, line.text)
 	}
-	flush()
+
+	return joinHyphenatedBodies(sections.Sections())
+}
+
+// joinHyphenatedBodies repairs words split across a line break, which can only be done once a
+// section's lines are joined.
+func joinHyphenatedBodies(sections []strategy.Section) []strategy.Section {
+	for i, section := range sections {
+		sections[i].Body = joinHyphenatedLineBreaks(section.Body)
+	}
 
 	return sections
 }
