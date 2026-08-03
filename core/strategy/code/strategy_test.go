@@ -1,8 +1,11 @@
 package code
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/alecthomas/chroma/v2"
 
 	"github.com/davidbelicza/semantic-search/core/storage"
 	"github.com/davidbelicza/semantic-search/core/strategy"
@@ -279,5 +282,17 @@ func TestSplitSourceUnknownExtensionFallsBackToFlat(t *testing.T) {
 func TestTokenizeUnknownExtensionReturnsNil(t *testing.T) {
 	if tokens := tokenize("mystery.zzz", "content"); tokens != nil {
 		t.Fatalf("expected nil tokens when no lexer matches, got %d", len(tokens))
+	}
+}
+
+func TestTokenizeReturnsNilWhenTheLexerFails(t *testing.T) {
+	original := tokenise
+	tokenise = func(chroma.Lexer, *chroma.TokeniseOptions, string) ([]chroma.Token, error) {
+		return nil, errors.New("lex failed")
+	}
+	defer func() { tokenise = original }()
+
+	if tokens := tokenize("a.go", "package p"); tokens != nil {
+		t.Fatalf("expected nil tokens when the lexer fails, got %d", len(tokens))
 	}
 }

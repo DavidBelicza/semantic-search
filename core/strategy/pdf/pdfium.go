@@ -26,10 +26,16 @@ type PDFium struct {
 	instance pdfium.Pdfium
 }
 
+// initPDFiumPool starts the embedded engine's worker pool. It is a variable so a test can
+// reach the startup failures a working runtime never produces.
+var initPDFiumPool = func() (pdfium.Pool, error) {
+	return webassembly.Init(webassembly.Config{MinIdle: 1, MaxIdle: 1, MaxTotal: 1})
+}
+
 // NewPDFium initializes the embedded PDFium engine. The returned extractor must be closed
 // with Close to release the worker and its memory.
 func NewPDFium() (*PDFium, error) {
-	pool, err := webassembly.Init(webassembly.Config{MinIdle: 1, MaxIdle: 1, MaxTotal: 1})
+	pool, err := initPDFiumPool()
 	if err != nil {
 		return nil, err
 	}

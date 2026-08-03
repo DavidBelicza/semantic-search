@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/davidbelicza/semantic-search/core/storage"
+	"github.com/davidbelicza/semantic-search/core/storage/postgres"
 	"github.com/davidbelicza/semantic-search/core/strategy"
+	"github.com/davidbelicza/semantic-search/core/strategy/pdf"
 )
 
 // fixedEmbedder returns the same unit vector for every input, so an index→search round-trip
@@ -567,5 +569,26 @@ func TestNewPostgresStorageFailsWhenSchemaCannotBeCreated(t *testing.T) {
 	dsn := "postgres://user:pass@127.0.0.1:1/nodb?sslmode=disable&connect_timeout=1"
 	if _, err := NewPostgresStorage(context.Background(), dsn); err == nil {
 		t.Fatal("expected an error when the schema cannot be prepared")
+	}
+}
+
+func TestNewPostgresStorageReportsAnOpenFailure(t *testing.T) {
+	original := openPostgres
+	openPostgres = func(string) (*postgres.Store, error) { return nil, errors.New("open failed") }
+	defer func() { openPostgres = original }()
+
+	if _, err := NewPostgresStorage(context.Background(), "postgres://x/y"); err == nil {
+		t.Fatal("expected the open error to propagate")
+	}
+}
+
+func TestPDFStrategyReportsAnExtractorStartupFailure(t *testing.T) {
+	original := newPDFExtractor
+	newPDFExtractor = func() (*pdf.PDFium, error) { return nil, errors.New("engine failed") }
+	defer func() { newPDFExtractor = original }()
+
+	_, _, err := NewPDFStrategy().Build(NewModel(Gemma300mQAT), fixedEmbedder{})
+	if err == nil {
+		t.Fatal("expected the extractor startup error to propagate")
 	}
 }

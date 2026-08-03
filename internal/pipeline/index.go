@@ -57,8 +57,12 @@ func Index(ctx context.Context, store IndexStore, pool strategy.Pool, rootPath s
 	return fingerprint(ctx, store, pool, failFast, progress)
 }
 
+// absolutePath resolves the walk root. It is a variable so a test can reach the failure that
+// only occurs when the process has no working directory.
+var absolutePath = filepath.Abs
+
 func discover(pool strategy.Pool, root string, options Options) ([]storage.FileMetadata, error) {
-	rootAbs, err := filepath.Abs(root)
+	rootAbs, err := absolutePath(root)
 	if err != nil {
 		return nil, err
 	}

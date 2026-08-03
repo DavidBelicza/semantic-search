@@ -273,7 +273,10 @@ func truncate(text string, max int) string {
 	return text[:max]
 }
 
-func encodeEmbeddingRequest(request openAIEmbeddingRequest) ([]byte, error) {
+// encodeEmbeddingRequest serializes a request body with HTML escaping off, so text keeps its
+// raw &, <, and > rather than the \u form. It takes any value, and is a variable, so a test
+// can reach the encoding failure that a well-formed request never produces.
+var encodeEmbeddingRequest = func(request any) ([]byte, error) {
 	var body bytes.Buffer
 	encoder := json.NewEncoder(&body)
 	encoder.SetEscapeHTML(false)
