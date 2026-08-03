@@ -248,6 +248,34 @@ func TestParentHeadingIsLeftToItsChildren(t *testing.T) {
 	assertSection(t, sections, []string{"Parent", "Child"}, "body")
 }
 
+func TestDeepHeadingChainWithoutBodyUsesTheLastHeadingAsText(t *testing.T) {
+	// h1 > h2 > h3 and no prose: the deepest heading becomes the body, and the whole chain
+	// stays as the path. The two outer headings only introduce deeper ones, so they do not
+	// repeat as sections of their own.
+	sections := parseSections(t, `<body><h1>A</h1><h2>B</h2><h3>C</h3></body>`)
+
+	if len(sections) != 1 {
+		t.Fatalf("expected exactly one section, got %#v", sections)
+	}
+	assertSection(t, sections, []string{"A", "B", "C"}, "C")
+}
+
+func TestDeepHeadingChainPrefersRealBodyText(t *testing.T) {
+	sections := parseSections(t, `<body><h1>A</h1><h2>B</h2><h3>C</h3><p>real body</p></body>`)
+
+	if len(sections) != 1 {
+		t.Fatalf("expected exactly one section, got %#v", sections)
+	}
+	assertSection(t, sections, []string{"A", "B", "C"}, "real body")
+}
+
+func TestSiblingBranchesEachGetTheirOwnLeaf(t *testing.T) {
+	sections := parseSections(t, `<body><h1>A</h1><h2>B</h2><h3>C</h3><h2>D</h2></body>`)
+
+	assertSection(t, sections, []string{"A", "B", "C"}, "C")
+	assertSection(t, sections, []string{"A", "D"}, "D")
+}
+
 func TestTrailingLeafHeadingIsEmittedAtEnd(t *testing.T) {
 	sections := parseSections(t, `<body><h1>Topic</h1><p>body</p><h2>Trailing</h2></body>`)
 
