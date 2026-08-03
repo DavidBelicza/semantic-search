@@ -6,8 +6,8 @@ import (
 	"golang.org/x/net/html"
 )
 
-// skipped elements never contribute prose: their text content is code, styling, or metadata
-// that would only pollute the index. Their whole subtree is dropped.
+// skipped elements never contribute prose: their text is code, styling, metadata, or page
+// furniture repeated on every page. Their whole subtree is dropped.
 var skipped = map[string]struct{}{
 	"script":   {},
 	"style":    {},
@@ -16,6 +16,9 @@ var skipped = map[string]struct{}{
 	"svg":      {},
 	"canvas":   {},
 	"head":     {},
+	"nav":      {},
+	"footer":   {},
+	"aside":    {},
 }
 
 // blocks force a paragraph break around their content. Everything else is inline and

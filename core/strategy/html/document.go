@@ -24,16 +24,34 @@ func extractSections(content []byte) ([]strategy.Section, error) {
 	return sectionsFromBlocks(walk.blocks), nil
 }
 
-// contentRoot picks the subtree worth indexing: the marked main content when present,
-// otherwise the body, so navigation and page furniture outside it are skipped.
+// contentRoot picks the subtree worth indexing: <main> when present, else a lone <article>,
+// else the body. A page with several articles is a listing, not a single document, so its
+// first article is not the content root.
 func contentRoot(document *html.Node) *html.Node {
-	for _, name := range []string{"main", "article", "body"} {
-		if found := findElement(document, name); found != nil {
-			return found
-		}
+	if main := findElement(document, "main"); main != nil {
+		return main
+	}
+	if articles := findElements(document, "article"); len(articles) == 1 {
+		return articles[0]
+	}
+	if body := findElement(document, "body"); body != nil {
+		return body
 	}
 
 	return document
+}
+
+func findElements(node *html.Node, name string) []*html.Node {
+	var found []*html.Node
+	if elementName(node) == name {
+		found = append(found, node)
+	}
+
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		found = append(found, findElements(child, name)...)
+	}
+
+	return found
 }
 
 func findElement(node *html.Node, name string) *html.Node {
@@ -185,34 +203,50 @@ func sectionsFromBlocks(blocks []block) []strategy.Section {
 // sectionizer assembles sections from a stream of headings and body paragraphs, using the
 // shared heading stack so each section carries its full heading path.
 type sectionizer struct {
-	stack    []textproc.HeadingEntry
-	sections []strategy.Section
-	body     strings.Builder
+	stack        []textproc.HeadingEntry
+	sections     []strategy.Section
+	body         strings.Builder
+	pending      string
+	pendingLevel int
 }
 
 func (s *sectionizer) addHeading(level int, text string) {
-	s.flush()
+	s.close(level)
 	s.stack = textproc.PushHeading(s.stack, level, text)
+	s.pending = text
+	s.pendingLevel = level
 }
 
 func (s *sectionizer) addBody(text string) {
+	s.pending = ""
 	if s.body.Len() > 0 {
 		s.body.WriteString("\n\n")
 	}
 	s.body.WriteString(text)
 }
 
-func (s *sectionizer) flush() {
-	if strings.TrimSpace(s.body.String()) == "" {
-		s.body.Reset()
+// close ends the open section. A heading that never received body text is emitted on its own
+// rather than dropped, so a page whose prose sits in its headings is still indexed; a heading
+// that only introduces deeper ones is left to its children.
+func (s *sectionizer) close(level int) {
+	body := strings.TrimSpace(s.body.String())
+	s.body.Reset()
+	if body != "" {
+		s.emit(body)
 		return
 	}
+	if s.pending != "" && level <= s.pendingLevel {
+		s.emit(s.pending)
+	}
 
-	s.sections = append(s.sections, strategy.Section{Path: textproc.PathOf(s.stack), Body: s.body.String()})
-	s.body.Reset()
+	s.pending = ""
+}
+
+func (s *sectionizer) emit(body string) {
+	s.sections = append(s.sections, strategy.Section{Path: textproc.PathOf(s.stack), Body: body})
 }
 
 func (s *sectionizer) result() []strategy.Section {
-	s.flush()
+	s.close(1)
 	return s.sections
 }
