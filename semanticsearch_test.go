@@ -558,3 +558,14 @@ func TestEngineIndexReleasesOpenedStrategiesOnBuildError(t *testing.T) {
 		t.Fatal("expected the build error to propagate after releasing the PDF extractor")
 	}
 }
+
+// TestNewPostgresStorageFailsWhenSchemaCannotBeCreated covers the path where the DSN parses
+// and opens lazily but the server is unreachable, so preparing the schema fails and the
+// half-open store is closed before the error is returned.
+func TestNewPostgresStorageFailsWhenSchemaCannotBeCreated(t *testing.T) {
+	// Port 1 is reserved and never serves Postgres, so the first real round-trip fails.
+	dsn := "postgres://user:pass@127.0.0.1:1/nodb?sslmode=disable&connect_timeout=1"
+	if _, err := NewPostgresStorage(context.Background(), dsn); err == nil {
+		t.Fatal("expected an error when the schema cannot be prepared")
+	}
+}
