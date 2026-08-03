@@ -6,6 +6,7 @@
 package html
 
 import (
+	"bytes"
 	"path/filepath"
 	"strings"
 
@@ -37,10 +38,7 @@ func (htmlStrategy) Claims(path string) bool {
 // Parse turns the markup into heading-structured sections. The bytes are self-contained, so
 // no file path is needed here.
 func (htmlStrategy) Parse(content []byte) (strategy.ParsedDocument, error) {
-	sections, err := extractSections(content)
-	if err != nil {
-		return strategy.ParsedDocument{}, err
-	}
+	sections, err := extractSections(bytes.NewReader(content))
 
-	return strategy.ParsedDocument{Sections: sections}, nil
+	return strategy.ParsedDocument{Sections: sections}, err
 }

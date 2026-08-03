@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,6 +138,43 @@ func TestEngineIndexAcceptsPositiveEmbedBatchSize(t *testing.T) {
 	size := 1
 	if err := engine.Index(context.Background(), dir, IndexOptions{EmbedBatchSize: &size}); err != nil {
 		t.Fatalf("index with EmbedBatchSize 1: %v", err)
+	}
+}
+
+func TestEngineIndexesHTMLFiles(t *testing.T) {
+	dir := t.TempDir()
+	page := `<html><head><style>body{color:red}</style></head><body>
+		<nav><a href="/">Menu</a></nav>
+		<main><h1>Policies</h1><h2>Vacation</h2>
+		<p>The vacation policy grants fifteen paid days.</p></main>
+	</body></html>`
+	if err := os.WriteFile(filepath.Join(dir, "policies.html"), []byte(page), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	engine := newTestEngine(t, NewHTMLStrategy())
+	ctx := context.Background()
+
+	if err := engine.Index(ctx, dir, IndexOptions{FailFast: true}); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+
+	results, err := engine.Search(ctx, SearchConfig{Query: "vacation"})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 1 || results[0].FileName != "policies.html" {
+		t.Fatalf("expected the html document indexed, got %#v", results)
+	}
+
+	chunk := results[0].Chunks[0]
+	if chunk.Title != "Policies > Vacation" {
+		t.Fatalf("chunk title should carry the heading path, got %q", chunk.Title)
+	}
+	for _, dropped := range []string{"color:red", "Menu", "<p>", "<h1>"} {
+		if strings.Contains(chunk.Text, dropped) {
+			t.Fatalf("expected %q dropped from the indexed text, got %q", dropped, chunk.Text)
+		}
 	}
 }
 
@@ -318,6 +356,7 @@ func TestStrategyFactoriesBuild(t *testing.T) {
 		NewPDFStrategy(),
 		NewCodeStrategy(),
 		NewDocxStrategy(),
+		NewHTMLStrategy(),
 		NewTextStrategy(),
 	}
 	for _, factory := range factories {

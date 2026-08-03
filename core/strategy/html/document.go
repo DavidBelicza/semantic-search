@@ -1,8 +1,8 @@
 package html
 
 import (
-	"bytes"
 	"fmt"
+	"io"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -12,8 +12,8 @@ import (
 )
 
 // extractSections parses the markup and turns its heading-structured content into sections.
-func extractSections(content []byte) ([]strategy.Section, error) {
-	document, err := html.Parse(bytes.NewReader(content))
+func extractSections(r io.Reader) ([]strategy.Section, error) {
+	document, err := html.Parse(r)
 	if err != nil {
 		return nil, fmt.Errorf("parse html: %w", err)
 	}
