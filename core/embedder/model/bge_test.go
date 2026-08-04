@@ -18,7 +18,7 @@ func TestBGELargeModelMetadata(t *testing.T) {
 
 func TestBGELargeModelBuildData(t *testing.T) {
 	got := BGELargeModel{}.BuildData(storage.Chunk{Title: "Payments", Text: "pay the invoice"})
-	if got != "pay the invoice" {
+	if got != "Payments\npay the invoice" {
 		t.Fatalf("build data mismatch: %q", got)
 	}
 }

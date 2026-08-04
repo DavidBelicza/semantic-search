@@ -24,6 +24,7 @@ import (
 	"github.com/davidbelicza/semantic-search/core/strategy/code"
 	"github.com/davidbelicza/semantic-search/core/strategy/docx"
 	"github.com/davidbelicza/semantic-search/core/strategy/general"
+	"github.com/davidbelicza/semantic-search/core/strategy/html"
 	"github.com/davidbelicza/semantic-search/core/strategy/markdown"
 	"github.com/davidbelicza/semantic-search/core/strategy/pdf"
 	"github.com/davidbelicza/semantic-search/internal/pipeline"
@@ -336,8 +337,12 @@ func NewSQLiteVectorStorage(ctx context.Context, path string, dimensions int) (s
 // NewPostgresStorage opens a PostgreSQL metadata store at dsn (e.g.
 // "postgres://user:pass@host:5432/db?sslmode=disable") and prepares its schema. It uses the
 // pure-Go pgx driver, so a Postgres-only build needs no cgo.
+// openPostgres opens the metadata store. It is a variable so a test can reach the failure the
+// lazy driver does not produce for a malformed DSN.
+var openPostgres = postgres.Open
+
 func NewPostgresStorage(ctx context.Context, dsn string) (storage.Storage, error) {
-	store, err := postgres.Open(dsn)
+	store, err := openPostgres(dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -399,18 +404,32 @@ func NewMarkdownStrategy() StrategyFactory {
 	}
 }
 
+// newPDFExtractor starts the PDF engine. It is a variable so a test can reach the startup
+// failure a working runtime does not produce.
+var newPDFExtractor = pdf.NewPDFium
+
 // NewPDFStrategy registers the PDF strategy. Each engine gets its own PDFium extractor, which
 // the engine releases after indexing.
 func NewPDFStrategy() StrategyFactory {
 	return StrategyFactory{
 		Extensions: []string{".pdf"},
 		Build: func(model strategy.EmbeddingModel, embedder strategy.AiClient) (strategy.Strategy, func() error, error) {
-			extractor, err := pdf.NewPDFium()
+			extractor, err := newPDFExtractor()
 			if err != nil {
 				return nil, nil, err
 			}
 
 			return pdf.NewPDFStrategy(general.NewGeneralStrategy(model, embedder), extractor), extractor.Close, nil
+		},
+	}
+}
+
+// NewHTMLStrategy registers the HTML strategy.
+func NewHTMLStrategy() StrategyFactory {
+	return StrategyFactory{
+		Extensions: []string{".html", ".htm", ".xhtml"},
+		Build: func(model strategy.EmbeddingModel, embedder strategy.AiClient) (strategy.Strategy, func() error, error) {
+			return html.NewHTMLStrategy(general.NewGeneralStrategy(model, embedder)), nil, nil
 		},
 	}
 }

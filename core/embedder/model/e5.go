@@ -22,9 +22,9 @@ func (E5LargeModel) Name() string { return E5LargeModelName }
 
 func (E5LargeModel) Dimensions() int { return E5LargeModelDimensions }
 
-// BuildData formats a chunk for indexing with E5's document prefix.
+// BuildData formats a chunk's heading path and text with E5's document prefix.
 func (E5LargeModel) BuildData(chunk storage.Chunk) string {
-	return "passage: " + chunk.Text
+	return "passage: " + titledText(chunk)
 }
 
 // BuildQuery formats a search query with E5's query prefix. E5 embeds queries in a single mode,

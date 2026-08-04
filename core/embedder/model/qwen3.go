@@ -25,9 +25,9 @@ func (Qwen3SmallModel) Name() string { return Qwen3SmallModelName }
 
 func (Qwen3SmallModel) Dimensions() int { return Qwen3SmallModelDimensions }
 
-// BuildData embeds the chunk's text as-is; Qwen3 uses no document-side instruction.
+// BuildData embeds the chunk's heading path and text; Qwen3 uses no document-side instruction.
 func (Qwen3SmallModel) BuildData(chunk storage.Chunk) string {
-	return chunk.Text
+	return titledText(chunk)
 }
 
 // BuildQuery wraps the query in Qwen3's "Instruct: … Query: …" template. The task type is the

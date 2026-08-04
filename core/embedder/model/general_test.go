@@ -13,9 +13,9 @@ func TestGeneralModelMetadata(t *testing.T) {
 	}
 }
 
-func TestGeneralModelBuildDataOmitsTitle(t *testing.T) {
+func TestGeneralModelBuildDataIncludesTitle(t *testing.T) {
 	got := NewGeneralModel("m", 1).BuildData(storage.Chunk{Title: "Payments", Text: "pay the invoice"})
-	if got != "pay the invoice" {
+	if got != "Payments\npay the invoice" {
 		t.Fatalf("build data mismatch: %q", got)
 	}
 }

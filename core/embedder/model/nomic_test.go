@@ -1,7 +1,6 @@
 package model
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/davidbelicza/semantic-search/core/storage"
@@ -19,11 +18,8 @@ func TestNomicModelMetadata(t *testing.T) {
 
 func TestNomicModelBuildData(t *testing.T) {
 	got := NomicModel{}.BuildData(storage.Chunk{Title: "Payments", Text: "pay the invoice"})
-	if got != "search_document: pay the invoice" {
+	if got != "search_document: Payments\npay the invoice" {
 		t.Fatalf("build data mismatch: %q", got)
-	}
-	if strings.Contains(got, "Payments") {
-		t.Fatalf("build data must not include the title: %q", got)
 	}
 }
 

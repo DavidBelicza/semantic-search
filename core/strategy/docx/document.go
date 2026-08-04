@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/davidbelicza/semantic-search/core/strategy"
-	"github.com/davidbelicza/semantic-search/internal/textproc"
+	"github.com/davidbelicza/semantic-search/core/strategy/general"
 )
 
 const (
@@ -62,13 +62,13 @@ func openZipPart(reader *zip.Reader, name string) (io.ReadCloser, error) {
 // updates the path) or body text (which fills the current section).
 func sectionizeDocument(r io.Reader, levels map[string]int) ([]strategy.Section, error) {
 	decoder := xml.NewDecoder(r)
-	sections := &sectionizer{}
+	sections := general.NewSectionizer(paragraphSeparator)
 	para := paragraph{outline: -1}
 
 	for {
 		tok, err := decoder.Token()
 		if err == io.EOF {
-			return sections.result(), nil
+			return sections.Sections(), nil
 		}
 		if err != nil {
 			return nil, fmt.Errorf("parse %s: %w", documentPart, err)
@@ -86,7 +86,7 @@ type paragraph struct {
 	capturing bool
 }
 
-func (p *paragraph) consume(tok xml.Token, sections *sectionizer, levels map[string]int) {
+func (p *paragraph) consume(tok xml.Token, sections *general.Sectionizer, levels map[string]int) {
 	switch t := tok.(type) {
 	case xml.StartElement:
 		p.start(t)
@@ -120,7 +120,7 @@ func (p *paragraph) chars(data xml.CharData) {
 	p.text.Write(data)
 }
 
-func (p *paragraph) end(t xml.EndElement, sections *sectionizer, levels map[string]int) {
+func (p *paragraph) end(t xml.EndElement, sections *general.Sectionizer, levels map[string]int) {
 	switch t.Name.Local {
 	case "t":
 		p.capturing = false
@@ -129,16 +129,16 @@ func (p *paragraph) end(t xml.EndElement, sections *sectionizer, levels map[stri
 	}
 }
 
-func (p *paragraph) commit(sections *sectionizer, levels map[string]int) {
+func (p *paragraph) commit(sections *general.Sectionizer, levels map[string]int) {
 	text := strings.TrimSpace(p.text.String())
 	level := p.level(levels)
 
 	if level > 0 {
-		sections.addHeading(level, text)
+		sections.AddHeading(level, text)
 		return
 	}
 
-	sections.addBody(text)
+	sections.AddBody(text)
 }
 
 // level is the paragraph's heading level: a direct outlineLvl wins, else its style's level,
@@ -151,45 +151,5 @@ func (p *paragraph) level(levels map[string]int) int {
 	return levels[p.style]
 }
 
-// sectionizer assembles sections from a stream of headings and body paragraphs, using the
-// shared heading stack so each section carries its full heading path.
-type sectionizer struct {
-	stack    []textproc.HeadingEntry
-	sections []strategy.Section
-	body     strings.Builder
-}
-
-func (s *sectionizer) addHeading(level int, text string) {
-	if text == "" {
-		return
-	}
-
-	s.flush()
-	s.stack = textproc.PushHeading(s.stack, level, text)
-}
-
-func (s *sectionizer) addBody(text string) {
-	if text == "" {
-		return
-	}
-
-	if s.body.Len() > 0 {
-		s.body.WriteString("\n\n")
-	}
-	s.body.WriteString(text)
-}
-
-func (s *sectionizer) flush() {
-	if strings.TrimSpace(s.body.String()) == "" {
-		s.body.Reset()
-		return
-	}
-
-	s.sections = append(s.sections, strategy.Section{Path: textproc.PathOf(s.stack), Body: s.body.String()})
-	s.body.Reset()
-}
-
-func (s *sectionizer) result() []strategy.Section {
-	s.flush()
-	return s.sections
-}
+// paragraphSeparator joins the paragraphs of one section.
+const paragraphSeparator = "\n\n"

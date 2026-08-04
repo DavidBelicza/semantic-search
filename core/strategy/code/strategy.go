@@ -87,15 +87,20 @@ func (codeStrategy) splitSource(path, source string) []strategy.Section {
 	return splitter.Split(source, tokenize(path, source))
 }
 
+// tokenise lexes a source file. It is a variable so a test can reach the failure a shipped
+// lexer does not produce.
+var tokenise = chroma.Tokenise
+
 // tokenize lexes source with the Chroma lexer matched from the file name, returning nil when
-// no lexer matches (the flat and brace/indent splitters all tolerate an empty token stream).
+// no lexer matches or the lexer fails (the flat and brace/indent splitters all tolerate an
+// empty token stream).
 func tokenize(path, source string) []chroma.Token {
 	lexer := lexers.Match(path)
 	if lexer == nil {
 		return nil
 	}
 
-	tokens, err := chroma.Tokenise(lexer, nil, source)
+	tokens, err := tokenise(lexer, nil, source)
 	if err != nil {
 		return nil
 	}

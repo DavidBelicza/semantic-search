@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/klippa-app/go-pdfium"
 	"github.com/klippa-app/go-pdfium/requests"
@@ -178,5 +179,28 @@ func TestCloseReleasesInstanceThenPool(t *testing.T) {
 	}
 	if err := (&PDFium{instance: fakeInstance{}, pool: fakePool{}}).Close(); err != nil {
 		t.Fatalf("clean close should succeed: %v", err)
+	}
+}
+
+// failingGetInstancePool starts fine but cannot hand out a worker.
+type failingGetInstancePool struct{ pdfium.Pool }
+
+func (failingGetInstancePool) GetInstance(time.Duration) (pdfium.Pdfium, error) {
+	return nil, errTest
+}
+func (failingGetInstancePool) Close() error { return nil }
+
+func TestNewPDFiumReportsStartupFailures(t *testing.T) {
+	original := initPDFiumPool
+	defer func() { initPDFiumPool = original }()
+
+	initPDFiumPool = func() (pdfium.Pool, error) { return nil, errTest }
+	if _, err := NewPDFium(); err == nil {
+		t.Fatal("expected the pool startup error")
+	}
+
+	initPDFiumPool = func() (pdfium.Pool, error) { return failingGetInstancePool{}, nil }
+	if _, err := NewPDFium(); err == nil {
+		t.Fatal("expected the worker checkout error")
 	}
 }

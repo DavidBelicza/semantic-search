@@ -44,3 +44,20 @@ func TestParseRejectsMalformedDocumentXML(t *testing.T) {
 		t.Fatal("expected a decode error for malformed document.xml")
 	}
 }
+
+// TestDocxHeadingsWithoutBodyAreStillIndexed covers a document whose prose sits in its
+// headings: the deepest heading becomes the section text rather than being dropped.
+func TestDocxHeadingsWithoutBodyAreStillIndexed(t *testing.T) {
+	content := makeDocx(t, document(para("Heading1", "Alpha")+para("Heading2", "Beta")), headingStyles())
+
+	parsed, err := newDocx().Parse(content)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(parsed.Sections) != 1 {
+		t.Fatalf("expected one section, got %#v", parsed.Sections)
+	}
+	if got := parsed.Sections[0]; len(got.Path) != 2 || got.Body != "Beta" {
+		t.Fatalf("expected the leaf heading as the body, got %#v", got)
+	}
+}

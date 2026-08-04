@@ -5,11 +5,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/davidbelicza/semantic-search/core/storage"
+	"github.com/davidbelicza/semantic-search/core/storage/postgres"
 	"github.com/davidbelicza/semantic-search/core/strategy"
+	"github.com/davidbelicza/semantic-search/core/strategy/pdf"
 )
 
 // fixedEmbedder returns the same unit vector for every input, so an index→search round-trip
@@ -137,6 +140,43 @@ func TestEngineIndexAcceptsPositiveEmbedBatchSize(t *testing.T) {
 	size := 1
 	if err := engine.Index(context.Background(), dir, IndexOptions{EmbedBatchSize: &size}); err != nil {
 		t.Fatalf("index with EmbedBatchSize 1: %v", err)
+	}
+}
+
+func TestEngineIndexesHTMLFiles(t *testing.T) {
+	dir := t.TempDir()
+	page := `<html><head><style>body{color:red}</style></head><body>
+		<nav><a href="/">Menu</a></nav>
+		<main><h1>Policies</h1><h2>Vacation</h2>
+		<p>The vacation policy grants fifteen paid days.</p></main>
+	</body></html>`
+	if err := os.WriteFile(filepath.Join(dir, "policies.html"), []byte(page), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	engine := newTestEngine(t, NewHTMLStrategy())
+	ctx := context.Background()
+
+	if err := engine.Index(ctx, dir, IndexOptions{FailFast: true}); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+
+	results, err := engine.Search(ctx, SearchConfig{Query: "vacation"})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 1 || results[0].FileName != "policies.html" {
+		t.Fatalf("expected the html document indexed, got %#v", results)
+	}
+
+	chunk := results[0].Chunks[0]
+	if chunk.Title != "Policies > Vacation" {
+		t.Fatalf("chunk title should carry the heading path, got %q", chunk.Title)
+	}
+	for _, dropped := range []string{"color:red", "Menu", "<p>", "<h1>"} {
+		if strings.Contains(chunk.Text, dropped) {
+			t.Fatalf("expected %q dropped from the indexed text, got %q", dropped, chunk.Text)
+		}
 	}
 }
 
@@ -318,6 +358,7 @@ func TestStrategyFactoriesBuild(t *testing.T) {
 		NewPDFStrategy(),
 		NewCodeStrategy(),
 		NewDocxStrategy(),
+		NewHTMLStrategy(),
 		NewTextStrategy(),
 	}
 	for _, factory := range factories {
@@ -517,5 +558,37 @@ func TestEngineIndexReleasesOpenedStrategiesOnBuildError(t *testing.T) {
 	engine := newTestEngine(t, NewPDFStrategy(), failing)
 	if err := engine.Index(context.Background(), t.TempDir(), IndexOptions{}); err == nil {
 		t.Fatal("expected the build error to propagate after releasing the PDF extractor")
+	}
+}
+
+// TestNewPostgresStorageFailsWhenSchemaCannotBeCreated covers the path where the DSN parses
+// and opens lazily but the server is unreachable, so preparing the schema fails and the
+// half-open store is closed before the error is returned.
+func TestNewPostgresStorageFailsWhenSchemaCannotBeCreated(t *testing.T) {
+	// Port 1 is reserved and never serves Postgres, so the first real round-trip fails.
+	dsn := "postgres://user:pass@127.0.0.1:1/nodb?sslmode=disable&connect_timeout=1"
+	if _, err := NewPostgresStorage(context.Background(), dsn); err == nil {
+		t.Fatal("expected an error when the schema cannot be prepared")
+	}
+}
+
+func TestNewPostgresStorageReportsAnOpenFailure(t *testing.T) {
+	original := openPostgres
+	openPostgres = func(string) (*postgres.Store, error) { return nil, errors.New("open failed") }
+	defer func() { openPostgres = original }()
+
+	if _, err := NewPostgresStorage(context.Background(), "postgres://x/y"); err == nil {
+		t.Fatal("expected the open error to propagate")
+	}
+}
+
+func TestPDFStrategyReportsAnExtractorStartupFailure(t *testing.T) {
+	original := newPDFExtractor
+	newPDFExtractor = func() (*pdf.PDFium, error) { return nil, errors.New("engine failed") }
+	defer func() { newPDFExtractor = original }()
+
+	_, _, err := NewPDFStrategy().Build(NewModel(Gemma300mQAT), fixedEmbedder{})
+	if err == nil {
+		t.Fatal("expected the extractor startup error to propagate")
 	}
 }

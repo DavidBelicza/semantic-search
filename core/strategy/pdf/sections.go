@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/davidbelicza/semantic-search/core/strategy"
-	"github.com/davidbelicza/semantic-search/internal/textproc"
+	"github.com/davidbelicza/semantic-search/core/strategy/general"
 )
 
 const (
@@ -19,10 +19,25 @@ const (
 	// fontSizeRounding groups nearly equal font sizes so minor rendering differences do not
 	// fragment size classes.
 	fontSizeRounding = 2
+	// lineToleranceRatio is how far apart two runs' tops may be, as a fraction of the font
+	// size, while still counting as the same baseline.
+	lineToleranceRatio = 0.35
+	// minLineTolerance keeps the baseline tolerance usable when a run reports no font size.
+	minLineTolerance = 1.0
+	// averageGlyphWidthRatio estimates a glyph's width as a fraction of the font size, used to
+	// guess where a run ends.
+	averageGlyphWidthRatio = 0.5
+	// wordGapRatio is the gap, as a fraction of the font size, that separates words rather
+	// than letters.
+	wordGapRatio = 0.25
+	// overprintOverlapRatio is how far into a run a repeat of it may start, as a fraction of
+	// its width, and still count as the same glyphs drawn twice rather than a genuine repeat.
+	overprintOverlapRatio = 0.75
 )
 
 var (
 	hyphenatedLineBreak    = regexp.MustCompile(`(\p{L})-\n(\p{Ll})`)
+	repeatedSpaces         = regexp.MustCompile(` {2,}`)
 	headerFooterMinRepeats = 2
 )
 
@@ -48,41 +63,75 @@ func buildSectionsFromRuns(runs []TextRun) []strategy.Section {
 	return assembleSections(lines, baseline)
 }
 
-// groupRunsIntoLines merges runs that share a page and vertical position into single lines,
-// ordering each line's text left to right.
+// groupRunsIntoLines merges runs that share a page and baseline into single lines, ordering
+// each line's text left to right. A glyph's reported top depends on its shape — an "i" sits
+// higher than an "o" — so runs on one baseline are matched within a tolerance rather than by
+// an exact position, which would split a line into one fragment per glyph height.
 func groupRunsIntoLines(runs []TextRun) []textLine {
-	groups := map[string][]TextRun{}
-	var order []string
-	for _, run := range runs {
-		if strings.TrimSpace(run.Text) == "" {
-			continue
-		}
-		key := lineKey(run)
-		if _, seen := groups[key]; !seen {
-			order = append(order, key)
-		}
-		groups[key] = append(groups[key], run)
-	}
+	var lines []textLine
+	var current []TextRun
 
-	lines := make([]textLine, 0, len(order))
-	for _, key := range order {
-		lines = append(lines, lineFromRuns(groups[key]))
+	for _, run := range sortedRuns(runs) {
+		if len(current) > 0 && !sameLine(current[0], run) {
+			lines = append(lines, lineFromRuns(current))
+			current = nil
+		}
+		current = append(current, run)
+	}
+	if len(current) > 0 {
+		lines = append(lines, lineFromRuns(current))
 	}
 
 	return lines
 }
 
-func lineKey(run TextRun) string {
-	return strconv.Itoa(run.Page) + ":" + strconv.FormatFloat(math.Round(run.Y), 'f', 0, 64)
+// sortedRuns drops blank runs and orders the rest into reading order: page by page, top to
+// bottom, left to right. Higher Y is higher on the page.
+func sortedRuns(runs []TextRun) []TextRun {
+	ordered := make([]TextRun, 0, len(runs))
+	for _, run := range runs {
+		if strings.TrimSpace(run.Text) == "" {
+			continue
+		}
+		ordered = append(ordered, run)
+	}
+
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].Page != ordered[j].Page {
+			return ordered[i].Page < ordered[j].Page
+		}
+		if math.Abs(ordered[i].Y-ordered[j].Y) > lineTolerance(ordered[i].FontSize) {
+			return ordered[i].Y > ordered[j].Y
+		}
+		return ordered[i].X < ordered[j].X
+	})
+
+	return ordered
+}
+
+// sameLine reports whether a run sits on the same page and baseline as the line's first run.
+func sameLine(first, run TextRun) bool {
+	if first.Page != run.Page {
+		return false
+	}
+
+	return math.Abs(run.Y-first.Y) <= lineTolerance(first.FontSize)
+}
+
+// lineTolerance is how far a run's top may sit from its line's top and still belong to it. It
+// scales with the font size so it stays well below the line spacing at any size.
+func lineTolerance(fontSize float64) float64 {
+	tolerance := fontSize * lineToleranceRatio
+	if tolerance < minLineTolerance {
+		return minLineTolerance
+	}
+
+	return tolerance
 }
 
 func lineFromRuns(runs []TextRun) textLine {
-	sort.SliceStable(runs, func(i, j int) bool { return runs[i].X < runs[j].X })
-
-	texts := make([]string, 0, len(runs))
 	maxSize := 0.0
 	for _, run := range runs {
-		texts = append(texts, run.Text)
 		if run.FontSize > maxSize {
 			maxSize = run.FontSize
 		}
@@ -93,8 +142,62 @@ func lineFromRuns(runs []TextRun) textLine {
 		top:      runs[0].Y,
 		left:     runs[0].X,
 		fontSize: maxSize,
-		text:     strings.TrimSpace(strings.Join(textproc.NonEmptyTrimmed(texts), " ")),
+		text:     joinRunText(runs),
 	}
+}
+
+// joinRunText concatenates a line's runs. PDFium reports the spaces a PDF actually encodes, so
+// runs are joined directly rather than with a separator — inserting one would space out the
+// individual glyphs of a document that emits per-character runs. A space is added only when
+// neither side supplies one and the runs sit far enough apart to be separate words.
+func joinRunText(runs []TextRun) string {
+	var text strings.Builder
+	var previous *TextRun
+
+	for i := range runs {
+		// An overprint contributes no text, but it still advances the position the next run's
+		// gap is measured from, since it sits to the right of the run it repeats.
+		if previous != nil && isOverprint(*previous, runs[i]) {
+			previous = &runs[i]
+			continue
+		}
+		if previous != nil && needsSeparator(*previous, runs[i]) {
+			text.WriteString(" ")
+		}
+		text.WriteString(runs[i].Text)
+		previous = &runs[i]
+	}
+
+	return strings.TrimSpace(repeatedSpaces.ReplaceAllString(text.String(), " "))
+}
+
+// isOverprint reports whether a run repeats the previous one at an overlapping position. Some
+// PDFs simulate bold by drawing the same glyphs twice a fraction of a character apart, which
+// would otherwise double every letter of the word.
+func isOverprint(previous, next TextRun) bool {
+	if next.Text != previous.Text {
+		return false
+	}
+
+	return next.X-previous.X < runWidth(previous)*overprintOverlapRatio
+}
+
+func needsSeparator(previous, next TextRun) bool {
+	if strings.HasSuffix(previous.Text, " ") || strings.HasPrefix(next.Text, " ") {
+		return false
+	}
+
+	return next.X > estimatedRunEnd(previous)+previous.FontSize*wordGapRatio
+}
+
+// estimatedRunEnd approximates where a run's text ends horizontally. PDFium reports a run's
+// start but not its width, so the width is estimated from its glyph count.
+func estimatedRunEnd(run TextRun) float64 {
+	return run.X + runWidth(run)
+}
+
+func runWidth(run TextRun) float64 {
+	return float64(utf8.RuneCountInString(run.Text)) * run.FontSize * averageGlyphWidthRatio
 }
 
 // stripRepeatedHeadersAndFooters removes lines whose text recurs at the same vertical
@@ -172,28 +275,25 @@ func detectBodyFontSize(lines []textLine) float64 {
 func assembleSections(lines []textLine, baseline float64) []strategy.Section {
 	levels := headingLevelsBySize(lines, baseline)
 
-	var sections []strategy.Section
-	var stack []textproc.HeadingEntry
-	var body []string
-
-	flush := func() {
-		joined := joinHyphenatedLineBreaks(strings.TrimSpace(strings.Join(body, "\n")))
-		if joined != "" {
-			sections = append(sections, strategy.Section{Path: textproc.PathOf(stack), Body: joined})
-		}
-		body = nil
-	}
-
+	sections := general.NewSectionizer("\n")
 	for _, line := range lines {
 		level, isHeading := levels[roundFontSize(line.fontSize)]
 		if !isHeading {
-			body = append(body, line.text)
+			sections.AddBody(line.text)
 			continue
 		}
-		flush()
-		stack = textproc.PushHeading(stack, level, line.text)
+		sections.AddHeading(level, line.text)
 	}
-	flush()
+
+	return joinHyphenatedBodies(sections.Sections())
+}
+
+// joinHyphenatedBodies repairs words split across a line break, which can only be done once a
+// section's lines are joined.
+func joinHyphenatedBodies(sections []strategy.Section) []strategy.Section {
+	for i, section := range sections {
+		sections[i].Body = joinHyphenatedLineBreaks(section.Body)
+	}
 
 	return sections
 }

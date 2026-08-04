@@ -24,9 +24,9 @@ func (BGELargeModel) Name() string { return BGELargeModelName }
 
 func (BGELargeModel) Dimensions() int { return BGELargeModelDimensions }
 
-// BuildData embeds the chunk's text as-is; BGE uses no document-side prefix.
+// BuildData embeds the chunk's heading path and text; BGE uses no document-side prefix.
 func (BGELargeModel) BuildData(chunk storage.Chunk) string {
-	return chunk.Text
+	return titledText(chunk)
 }
 
 // BuildQuery prepends BGE's retrieval instruction to the query. BGE embeds queries in a single

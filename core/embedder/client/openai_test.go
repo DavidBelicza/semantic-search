@@ -473,3 +473,40 @@ func TestEmbedWithRetryStopsWhenContextCanceledDuringBackoff(t *testing.T) {
 		t.Fatal("expected a context-canceled error from the backoff wait")
 	}
 }
+
+func TestEmbedWithRetryReturnsWhenNoAttemptsAreAllowed(t *testing.T) {
+	// A negative retry budget means the attempt loop never runs, so the call falls through to
+	// the trailing return.
+	c := OpenAIClient{MaxRetries: -1}
+	if _, err := c.embedWithRetry(context.Background(), "http://h/v1/embeddings", nil, 1); err != nil {
+		t.Fatalf("expected no error when no attempt was made, got %v", err)
+	}
+}
+
+func TestEmbedOnceRejectsAnUnparseableEndpoint(t *testing.T) {
+	c := OpenAIClient{Model: "m"}
+	_, retryable, err := c.embedOnce(context.Background(), "://", nil, 1)
+	if err == nil {
+		t.Fatal("expected an error building the request")
+	}
+	if retryable {
+		t.Fatal("a malformed endpoint is not retryable")
+	}
+}
+
+func TestEncodeEmbeddingRequestReportsAnUnmarshalableValue(t *testing.T) {
+	if _, err := encodeEmbeddingRequest(make(chan int)); err == nil {
+		t.Fatal("expected an encoding error for an unmarshalable value")
+	}
+}
+
+func TestEmbedReportsAnEncodingFailure(t *testing.T) {
+	original := encodeEmbeddingRequest
+	encodeEmbeddingRequest = func(any) ([]byte, error) { return nil, errors.New("encode failed") }
+	defer func() { encodeEmbeddingRequest = original }()
+
+	c := OpenAIClient{BaseURL: "http://127.0.0.1:1234", Model: "m"}
+	if _, err := c.Embed(context.Background(), []string{"x"}); err == nil {
+		t.Fatal("expected the encoding error to propagate")
+	}
+}

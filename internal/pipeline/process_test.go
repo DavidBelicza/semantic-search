@@ -655,3 +655,13 @@ func TestProcessEmbedBatchSizeOfOne(t *testing.T) {
 		t.Fatalf("replace calls: got %d, want 3", vectorStore.replaceCalls)
 	}
 }
+
+func TestDiscoverReportsAnUnresolvableRoot(t *testing.T) {
+	original := absolutePath
+	absolutePath = func(string) (string, error) { return "", errors.New("no working directory") }
+	defer func() { absolutePath = original }()
+
+	if _, err := discover(strategy.NewPool(), "any", Options{}); err == nil {
+		t.Fatal("expected the unresolvable root error")
+	}
+}

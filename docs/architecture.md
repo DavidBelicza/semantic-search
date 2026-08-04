@@ -1,7 +1,7 @@
 # Architecture
 
-A Go library for semantic search over a directory of files (Markdown, PDF, code, DOCX, plain
-text). Files are discovered, chunked, and embedded through an OpenAI-compatible model server,
+A Go library for semantic search over a directory of files (Markdown, PDF, code, DOCX, HTML,
+plain text). Files are discovered, chunked, and embedded through an OpenAI-compatible model server,
 then stored either embedded in SQLite or server-side in PostgreSQL. Search embeds the query,
 ranks chunks by vector similarity, and returns the matching documents.
 
@@ -20,6 +20,7 @@ core/strategy        the per-file contract (Strategy interface) + Pool; concrete
                        strategy/pdf       PDF parsing (PDFium) + font-based sections
                        strategy/code      code parsing (Chroma lexer) + definition sections
                        strategy/docx      DOCX parsing (zip + XML) + heading sections
+                       strategy/html      HTML parsing (x/net/html) + heading sections
 core/storage         resource entities (Document, Chunk, …); no database code
   storage/sqlite     documents + chunks tables — embedded source of truth
   storage/sqlitevec  sqlite-vec vectors — embedded
@@ -57,7 +58,8 @@ Embed(ctx, chunks) ([][]float32, error)
 
 - **`general.GeneralStrategy`** — the base structured strategy: claims plain-text extensions,
   stat→metadata, hash, one section from the whole text, structured chunking (it owns the
-  shared `ChunkSections` engine), embed via the injected embedder.
+  shared `ChunkSections` engine and the `Sectionizer` every heading-based format assembles its
+  sections with), embed via the injected embedder.
 - **`markdown`** — overrides `Claims` (extension), `Parse` (goldmark headings → sections),
   and `Chunk` (fence-aware).
 - **`pdf`** — overrides `Claims` and `Parse` (PDFium extracts font-annotated runs; headings
@@ -71,8 +73,12 @@ Embed(ctx, chunks) ([][]float32, error)
   library — no CGO — and maps Word heading paragraphs onto the heading-path model via
   `outlineLvl`). It inherits chunking, metadata, fingerprint, and embed. See
   [chunking.md](chunking.md).
+- **`html`** — overrides `Claims` (`.html`, `.htm`, `.xhtml`) and `Parse` (a tolerant parser
+  reads text nodes only, so tags never reach the index; `<h1>`-`<h6>` map onto the heading-path
+  model, and script, style, and navigation subtrees are dropped). It inherits chunking,
+  metadata, fingerprint, and embed. See [chunking.md](chunking.md).
 
-Markdown, PDF, Code, and DOCX **embed** `GeneralStrategy` (Go composition, not inheritance), reusing its
+Markdown, PDF, Code, DOCX, and HTML **embed** `GeneralStrategy` (Go composition, not inheritance), reusing its
 methods without proxy code and overriding only what their format needs. The embedder is
 injected, because embedding is an operation the strategy owns — though the pipeline batches it
 across files (see *Embedding*). A `Pool` holds the strategies; `Pool.For(path)` returns the
@@ -200,6 +206,12 @@ is the transport client speaking the OpenAI-compatible API. Keeping them separat
 same client serve any model. The default model is `EmbeddingGemma-300m-qat` (768-dim); its
 `BuildData`/`BuildQuery` apply the templates documents and queries need — omitting them badly
 degrades ranking.
+
+Every model's `BuildData` embeds the chunk's heading path along with its text, because the
+path often carries the subject that the body never names — a section titled "Refunds" whose
+body is only "Within five days." is unfindable by its own topic otherwise. Gemma formats the
+pair with its documented `title: … | text: …` template; the rest prefix the path on its own
+line.
 
 ### Batching (index side)
 

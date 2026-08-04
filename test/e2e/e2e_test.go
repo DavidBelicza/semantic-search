@@ -86,6 +86,7 @@ func newEngine(t *testing.T, store storage.Storage, vectors storage.VectorStorag
 			semanticsearch.NewMarkdownStrategy(),
 			semanticsearch.NewCodeStrategy(),
 			semanticsearch.NewDocxStrategy(),
+			semanticsearch.NewHTMLStrategy(),
 		},
 	})
 	if err != nil {
@@ -96,7 +97,7 @@ func newEngine(t *testing.T, store storage.Storage, vectors storage.VectorStorag
 }
 
 // assertRetrieval indexes the fixtures and checks that each query's top result comes from the
-// expected file, across all four formats.
+// expected file, across all five formats.
 func assertRetrieval(t *testing.T, engine *semanticsearch.Engine, dir string) {
 	t.Helper()
 	ctx := context.Background()
@@ -113,6 +114,7 @@ func assertRetrieval(t *testing.T, engine *semanticsearch.Engine, dir string) {
 		{"refund to the original payment method", "refund"},          // → billing.md
 		{"read the configuration file from disk", "config"},          // → loader.go
 		{"working remotely from home policy", "remote"},              // → handbook.docx
+		{"store the passphrase in the company vault", "passphrase"},  // → security.html
 	}
 
 	for _, tc := range cases {
@@ -192,6 +194,13 @@ func writeFixtures(t *testing.T, dir string) {
 	write(t, dir, "billing.md", "# Billing\n\n## Refunds\n\nA refund is returned to the original payment method within five business days.")
 	write(t, dir, "loader.go", "package app\n\n// ReadConfig loads the configuration file from disk and parses its settings.\nfunc ReadConfig(path string) (Config, error) {\n\treturn parseConfig(path)\n}\n")
 	writeDocx(t, filepath.Join(dir, "handbook.docx"), "Staff may work remotely from home up to three days per week with manager approval.")
+	// The script, style, and nav content must not reach the index, so the retrieval assertion
+	// below also proves the markup was stripped rather than merely parsed.
+	write(t, dir, "security.html", `<html><head><style>body{color:red}</style></head><body>`+
+		`<nav><a href="/">Home</a></nav>`+
+		`<main><h1>Security</h1><h2>Passwords</h2>`+
+		`<p>Choose a passphrase of at least sixteen characters and store it in the company vault.</p></main>`+
+		`<script>var tracking = "ignore me";</script></body></html>`)
 }
 
 func write(t *testing.T, dir, name, content string) {

@@ -1,7 +1,6 @@
 package model
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/davidbelicza/semantic-search/core/storage"
@@ -19,11 +18,8 @@ func TestE5LargeModelMetadata(t *testing.T) {
 
 func TestE5LargeModelBuildData(t *testing.T) {
 	got := E5LargeModel{}.BuildData(storage.Chunk{Title: "Payments", Text: "pay the invoice"})
-	if got != "passage: pay the invoice" {
+	if got != "passage: Payments\npay the invoice" {
 		t.Fatalf("build data mismatch: %q", got)
-	}
-	if strings.Contains(got, "Payments") {
-		t.Fatalf("build data must not include the title: %q", got)
 	}
 }
 

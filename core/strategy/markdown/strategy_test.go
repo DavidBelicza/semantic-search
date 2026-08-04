@@ -1,6 +1,7 @@
 package markdown
 
 import (
+	"github.com/davidbelicza/semantic-search/internal/textproc"
 	"strings"
 	"testing"
 
@@ -137,5 +138,16 @@ func TestMarkdownParseEdgeWhitespace(t *testing.T) {
 	src := "\n\n#\n\nBody line one.\n\n\nBody line two.\n"
 	if _, err := newMarkdown().Parse([]byte(src)); err != nil {
 		t.Fatalf("parse: %v", err)
+	}
+}
+
+// TestAvgTokenLenFallsBackToDefault covers the fallback used when a strategy carries no
+// configured average token length.
+func TestAvgTokenLenFallsBackToDefault(t *testing.T) {
+	if got := (markdownStrategy{}).avgTokenLen(); got != textproc.DefaultAverageTokenLength {
+		t.Fatalf("expected the default average token length, got %d", got)
+	}
+	if got := (markdownStrategy{averageTokenLength: 7}).avgTokenLen(); got != 7 {
+		t.Fatalf("expected the configured length, got %d", got)
 	}
 }
