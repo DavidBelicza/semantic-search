@@ -43,3 +43,31 @@ func TestConfigRedactsCredentialValues(t *testing.T) {
 		t.Fatalf("ordinary settings should be untouched:\n%s", joined)
 	}
 }
+
+func TestRedactURLCredentialHidesOnlyThePassword(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"postgres://appuser:S3cret@db01:5432/app", "postgres://appuser:[redacted]@db01:5432/app"},
+		{"redis://:OnlyPass@cache:6379/0", "redis://:[redacted]@cache:6379/0"},
+		{"jdbc:postgresql://db01/app", "jdbc:postgresql://db01/app"},
+		{"https://example.com/path", "https://example.com/path"},
+		{"not a url at all", "not a url at all"},
+		{"", ""},
+	}
+
+	for _, testCase := range cases {
+		if got := redactURLCredential(testCase.in); got != testCase.want {
+			t.Fatalf("%q: got %q, want %q", testCase.in, got, testCase.want)
+		}
+	}
+}
+
+func TestConfigRedactsACredentialInsideAConnectionString(t *testing.T) {
+	joined := joinedText(chunksOf(t, "/p/app.yaml", "database_url: postgres://u:TOPSECRET@db01/app\n"))
+
+	if strings.Contains(joined, "TOPSECRET") {
+		t.Fatalf("the DSN credential reached the index: %s", joined)
+	}
+	if !strings.Contains(joined, "postgres://u:[redacted]@db01/app") {
+		t.Fatalf("want the host kept and the password redacted: %s", joined)
+	}
+}

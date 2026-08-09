@@ -50,7 +50,8 @@ either sandboxed or done in memory-safe code.
 - **Credentials in config files are redacted.** Config formats are the most likely place in a
   corpus to hold secrets, so the config strategy replaces values under keys that name one
   (`password`, `api_key`, `client_secret` and similar) with `[redacted]` before they are
-  embedded or stored. The key stays searchable; the secret does not travel.
+  embedded or stored, and does the same for a password embedded in a connection string. The
+  key and the host stay searchable; the secret does not travel.
 
 ## Operational notes
 

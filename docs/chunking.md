@@ -155,8 +155,10 @@ file contains, which makes them the most useful text in it for a meaning-based s
 no comment syntax, so it contributes structure alone.
 
 **Values under keys that name a credential are replaced with `[redacted]`** before they leave
-the parser, since indexing sends chunk text to the embedding endpoint and stores it. The key
-stays indexed, so the setting is still findable; only the secret is withheld. Lock files and
+the parser, since indexing sends chunk text to the embedding endpoint and stores it, and a
+password embedded in a connection string (`postgres://user:pass@host`) is replaced the same
+way. The key and the host stay indexed, so the setting is still findable; only the secret is
+withheld. Lock files and
 generated output are skipped by name and by banner, as in the code strategy. A file that does
 not parse is still indexed as flat text rather than failing.
 

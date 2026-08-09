@@ -6,6 +6,8 @@
 package config
 
 import (
+	"strings"
+
 	"github.com/davidbelicza/semantic-search/core/storage"
 	"github.com/davidbelicza/semantic-search/core/strategy"
 	"github.com/davidbelicza/semantic-search/core/strategy/general"
@@ -117,6 +119,20 @@ func splitOversizedConfig(part string, budget int) []string {
 	average := textproc.DefaultAverageTokenLength
 
 	return textproc.JoinPartsIntoChunks(
-		textproc.NonEmptyLines(part), "\n", budget, average, 0, textproc.HardWindowSplitter(average),
+		indentedLines(part), "\n", budget, average, 0, textproc.HardWindowSplitter(average),
 	)
+}
+
+// indentedLines drops blank lines but keeps leading whitespace, so the indentation that carries
+// the nesting survives into the chunks of an oversized section.
+func indentedLines(text string) []string {
+	lines := strings.Split(text, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			kept = append(kept, line)
+		}
+	}
+
+	return kept
 }

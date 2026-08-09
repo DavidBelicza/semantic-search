@@ -63,5 +63,5 @@ func valueFor(n node) string {
 		return redactedValue
 	}
 
-	return n.Value
+	return redactURLCredential(n.Value)
 }

@@ -15,6 +15,7 @@ const generatedScanLines = 8
 var lockFileNames = []string{
 	"package-lock.json",
 	"npm-shrinkwrap.json",
+	"installed.json",
 	"composer.lock.json",
 	"bun.lock",
 	"deno.lock",

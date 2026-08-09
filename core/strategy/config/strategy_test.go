@@ -124,3 +124,20 @@ func TestSectionsOfFallsBackWhenTheTreeYieldsNothing(t *testing.T) {
 		t.Fatalf("got %v", sections)
 	}
 }
+
+func TestConfigKeepsIndentationInOversizedSections(t *testing.T) {
+	source := "l1:\n  l2:\n    l3:\n      l4:\n        l5:\n          l6:\n            leaf: " +
+		strings.Repeat("x", 4000) + "\n"
+
+	chunks := chunksOf(t, "/p/big.yaml", source)
+
+	if len(chunks) < 2 {
+		t.Fatalf("want an oversized section split into several chunks, got %d", len(chunks))
+	}
+	if chunks[0].Title != "l1 > l2 > l3 > l4" {
+		t.Fatalf("want the depth-capped path, got %q", chunks[0].Title)
+	}
+	if !strings.Contains(chunks[0].Text, "l5:\n  l6:") {
+		t.Fatalf("indentation was flattened: %q", chunks[0].Text)
+	}
+}

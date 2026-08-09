@@ -15,3 +15,14 @@ var secretKeyPattern = regexp.MustCompile(
 func isSecretKey(key string) bool {
 	return secretKeyPattern.MatchString(key)
 }
+
+// credentialInURL matches the password of a "scheme://user:password@host" value. Connection
+// strings carry a credential in the value rather than under a telling key, so the key pattern
+// alone would let them through.
+var credentialInURL = regexp.MustCompile(`([a-zA-Z][a-zA-Z0-9+.-]*://[^:/?#\s@]*):[^@/?#\s]+@`)
+
+// redactURLCredential hides the password inside a connection string, keeping the scheme, user,
+// and host searchable.
+func redactURLCredential(value string) string {
+	return credentialInURL.ReplaceAllString(value, "${1}:"+redactedValue+"@")
+}
