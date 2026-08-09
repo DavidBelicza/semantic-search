@@ -42,7 +42,7 @@ func writeComment(out *strings.Builder, comment string, pad string) {
 }
 
 func leafLine(n node) string {
-	value := valueFor(n)
+	value := n.Value
 	if n.Key == "" {
 		return "- " + value
 	}
@@ -56,12 +56,4 @@ func branchLabel(n node) string {
 	}
 
 	return n.Key + ":"
-}
-
-func valueFor(n node) string {
-	if isSecretKey(n.Key) {
-		return redactedValue
-	}
-
-	return redactURLCredential(n.Value)
 }

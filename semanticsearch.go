@@ -422,7 +422,7 @@ func NewDocxStrategy() StrategyFactory {
 }
 
 // NewConfigStrategy registers the config strategy (JSON, XML, YAML, INI, .properties). It
-// indexes settings by key path and redacts values under keys that name a credential.
+// indexes settings by key path.
 func NewConfigStrategy() StrategyFactory {
 	return StrategyFactory{
 		Extensions: []string{".json", ".xml", ".yaml", ".yml", ".ini", ".properties"},

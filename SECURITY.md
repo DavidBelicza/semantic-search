@@ -47,11 +47,6 @@ either sandboxed or done in memory-safe code.
   embedding dimension are ever interpolated into a query string.
 - **Symlinks are not followed by default**, so a symlink planted inside an indexed directory
   cannot pull in files from outside it.
-- **Credentials in config files are redacted.** Config formats are the most likely place in a
-  corpus to hold secrets, so the config strategy replaces values under keys that name one
-  (`password`, `api_key`, `client_secret` and similar) with `[redacted]` before they are
-  embedded or stored, and does the same for a password embedded in a connection string. The
-  key and the host stay searchable; the secret does not travel.
 
 ## Operational notes
 
@@ -60,6 +55,10 @@ either sandboxed or done in memory-safe code.
   endpoint keeps it on the machine, and a remote one sends the text of everything you index to
   that provider. Use HTTPS for any endpoint that is not loopback, since the request carries
   both your content and your `Authorization` header.
+- **Indexed files are indexed as they are.** The library does not scrub secrets from any
+  format. A password in a config file, a token in a `.txt` note, a key hardcoded in source, all
+  reach the embedder and the database verbatim. Keep credentials out of the corpus you index,
+  or filter those files before indexing.
 - The database stores full chunk text alongside the vectors. Protect it the way you would
   protect the documents it indexed.
 - Files are read into memory whole, with no built-in size cap. When indexing untrusted input,

@@ -133,34 +133,6 @@ func assertRetrieval(t *testing.T, engine *semanticsearch.Engine, dir string) {
 		}
 	}
 
-	assertCredentialWasRedacted(t, engine)
-}
-
-// assertCredentialWasRedacted proves the config strategy withheld the secret across the whole
-// pipeline: the value never reached a chunk, so it was neither embedded nor stored, while the
-// key it sat under is still searchable.
-func assertCredentialWasRedacted(t *testing.T, engine *semanticsearch.Engine) {
-	t.Helper()
-
-	results, err := engine.Search(context.Background(), semanticsearch.SearchConfig{Query: "warehouse password"})
-	if err != nil {
-		t.Fatalf("search for the credential: %v", err)
-	}
-
-	for _, document := range results {
-		for _, chunk := range document.Chunks {
-			if strings.Contains(chunk.Text, "hunter2") {
-				t.Fatalf("the credential reached the index: %q", chunk.Text)
-			}
-		}
-	}
-
-	if len(results) == 0 || len(results[0].Chunks) == 0 {
-		t.Fatal("the redacted setting should still be searchable by its key")
-	}
-	if !strings.Contains(results[0].Chunks[0].Text, "password = [redacted]") {
-		t.Errorf("want the key kept and the value redacted, got %q", results[0].Chunks[0].Text)
-	}
 }
 
 // resetPostgres drops the tables the stores use so each run starts clean.
@@ -232,12 +204,12 @@ func writeFixtures(t *testing.T, dir string) {
 		`<main><h1>Security</h1><h2>Passwords</h2>`+
 		`<p>Choose a passphrase of at least sixteen characters and store it in the company vault.</p></main>`+
 		`<script>var tracking = "ignore me";</script></body></html>`)
-	// The comment carries the natural language a config file has; the credential must be
-	// redacted before it is embedded or stored, which the assertion below also proves.
+	// The comment carries the natural language a config file has, which is what the query below
+	// matches on.
 	write(t, dir, "service.yaml", "# Connection settings for the reporting warehouse\n"+
 		"warehouse:\n"+
 		"  hostname: analytics.internal\n"+
-		"  password: hunter2\n")
+		"  pool_size: 20\n")
 }
 
 func write(t *testing.T, dir, name, content string) {

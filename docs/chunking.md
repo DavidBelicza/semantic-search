@@ -130,7 +130,7 @@ chunker (350 / 50).
 One strategy for every settings format, the way `strategy/code` is one strategy for every
 programming language. `.json`, `.xml`, `.yaml`/`.yml`, `.ini`, and `.properties` each have a
 small parser, and all of them decode into one shared tree (`node`: key, value, comment,
-children). Rendering, sectioning, and redaction are written once against that tree, so a YAML
+children). Rendering and sectioning are written once against that tree, so a YAML
 file and an XML file describing the same settings produce nearly the same chunk text and a
 query matches either. `.toml` is deferred; `.xhtml` belongs to HTML and cannot collide, since
 `filepath.Ext` returns only the segment after the last dot.
@@ -154,13 +154,8 @@ Comments are kept (`# ...` above the key). They are usually the only natural lan
 file contains, which makes them the most useful text in it for a meaning-based search. JSON has
 no comment syntax, so it contributes structure alone.
 
-**Values under keys that name a credential are replaced with `[redacted]`** before they leave
-the parser, since indexing sends chunk text to the embedding endpoint and stores it, and a
-password embedded in a connection string (`postgres://user:pass@host`) is replaced the same
-way. The key and the host stay indexed, so the setting is still findable; only the secret is
-withheld. Lock files and
-generated output are skipped by name and by banner, as in the code strategy. A file that does
-not parse is still indexed as flat text rather than failing.
+Lock files and generated output are skipped by name and by banner, as in the code strategy. A
+file that does not parse is still indexed as flat text rather than failing.
 
 Chunking is the shared engine at 350 / 40, with sections kept whole and oversized ones split on
 line boundaries.

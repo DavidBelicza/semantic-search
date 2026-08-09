@@ -74,7 +74,7 @@ on disk or in memory) and as a server-side knowledge base (using PostgreSQL and 
 | Code | `.go`, `.js`, `.ts`, `.jsx`, `.tsx`, `.py`, `.php`, `.java`, `.rb`, `.rs`, `.c`, `.h`, `.cpp`, `.hpp`, `.cs`, `.sh`, `.sql` | One section per function or class, titled with its full path |
 | DOCX | `.docx` | Split by Word heading styles |
 | HTML | `.html`, `.htm`, `.xhtml` | Text extracted from the HTML and split by `<h1>`-`<h6>` headings, with scripts, styles, and navigation dropped |
-| Config | `.json`, `.xml`, `.yaml`, `.yml`, `.ini`, `.properties` | Split by key path, so each chunk is titled with the setting it holds; comments are kept and credential values are redacted |
+| Config | `.json`, `.xml`, `.yaml`, `.yml`, `.ini`, `.properties` | Split by key path, so each chunk is titled with the setting it holds; comments are kept |
 
 ## How it works
 

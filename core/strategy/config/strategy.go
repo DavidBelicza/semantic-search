@@ -1,8 +1,8 @@
 // Package config provides the Config strategy, one strategy for every settings format (JSON,
 // XML, YAML, INI, .properties) as the code strategy is one strategy for every language. Each
-// format has its own parser decoding into one shared tree, so rendering, sectioning, and
-// redaction are written once. Sections are titled by key path; the descent is driven by size,
-// not nesting depth. Credential values are redacted; see redact.go.
+// format has its own parser decoding into one shared tree, so rendering and sectioning are
+// written once. Sections are titled by key path; the descent is driven by size, not nesting
+// depth.
 package config
 
 import (
@@ -30,7 +30,7 @@ type configStrategy struct {
 }
 
 // NewConfigStrategy builds the Config strategy over a GeneralStrategy it embeds for the
-// generic steps. Values under keys that name a credential are always redacted; see redact.go.
+// generic steps.
 func NewConfigStrategy(base general.GeneralStrategy) strategy.Strategy {
 	return configStrategy{
 		GeneralStrategy: base,
