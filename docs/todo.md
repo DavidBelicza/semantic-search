@@ -16,7 +16,7 @@ Status: **done** / **todo** (partial = base exists, needs wiring).
 | Code | `.go`, `.js`, `.ts`, `.jsx`, `.tsx`, `.py`, `.php`, `.java`, `.rb`, `.rs`, `.c`, `.h`, `.cpp`, `.hpp`, `.cs`, `.sh`, `.sql` | — | done | `github.com/alecthomas/chroma/v2` lexer (pure Go); structure-aware for brace + indent families; Ruby/SQL flat-windowed pending own splitter |
 | DOCX | `.docx` | — | done | stdlib `archive/zip` + `encoding/xml` (heading sections via `outlineLvl`; tables linearized) |
 | HTML | `.html`, `.htm`, `.xhtml` | — | done | `golang.org/x/net/html` (heading sections from `<h1>`-`<h6>`; `main`/`article`/`body` root; script, style, and navigation dropped) |
-| Config | `.json`, `.yaml`, `.yml`, `.toml`, `.ini`, `.properties` | P2 | todo | stdlib (v1, text); `gopkg.in/yaml.v3`, `encoding/json` (optional, key-path structure) |
+| Config | `.json`, `.xml`, `.yaml`, `.yml`, `.ini`, `.properties` | — | done | stdlib `encoding/json`, `encoding/xml`, line parser (`.ini`/`.properties`) + `go.yaml.in/yaml/v3`; one tree, key-path sections, credential redaction |
 | CSV / TSV | `.csv`, `.tsv` | P2 | todo | stdlib `encoding/csv` |
 | XLSX | `.xlsx` | P3 | todo | `github.com/xuri/excelize/v2` (BSD); or stdlib `archive/zip` + `encoding/xml` |
 | EPUB | `.epub` | P3 | todo | stdlib `archive/zip` + `golang.org/x/net/html`; alt `github.com/taylorskalyo/goreader` |

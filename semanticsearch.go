@@ -22,6 +22,7 @@ import (
 	"github.com/davidbelicza/semantic-search/core/storage/sqlitevec"
 	"github.com/davidbelicza/semantic-search/core/strategy"
 	"github.com/davidbelicza/semantic-search/core/strategy/code"
+	configstrategy "github.com/davidbelicza/semantic-search/core/strategy/config"
 	"github.com/davidbelicza/semantic-search/core/strategy/docx"
 	"github.com/davidbelicza/semantic-search/core/strategy/general"
 	"github.com/davidbelicza/semantic-search/core/strategy/html"
@@ -450,6 +451,17 @@ func NewDocxStrategy() StrategyFactory {
 		Extensions: []string{".docx"},
 		Build: func(model strategy.EmbeddingModel, embedder strategy.AiClient) (strategy.Strategy, func() error, error) {
 			return docx.NewDocxStrategy(general.NewGeneralStrategy(model, embedder)), nil, nil
+		},
+	}
+}
+
+// NewConfigStrategy registers the config strategy (JSON, XML, YAML, INI, .properties). It
+// indexes settings by key path and redacts values under keys that name a credential.
+func NewConfigStrategy() StrategyFactory {
+	return StrategyFactory{
+		Extensions: []string{".json", ".xml", ".yaml", ".yml", ".ini", ".properties"},
+		Build: func(model strategy.EmbeddingModel, embedder strategy.AiClient) (strategy.Strategy, func() error, error) {
+			return configstrategy.NewConfigStrategy(general.NewGeneralStrategy(model, embedder)), nil, nil
 		},
 	}
 }

@@ -125,6 +125,44 @@ with several articles is a listing, not a single document, so its first article 
 root. Like DOCX, HTML overrides only `Claims` and `Parse` and inherits the general paragraph
 chunker (350 / 50).
 
+## Config (`strategy/config`)
+
+One strategy for every settings format, the way `strategy/code` is one strategy for every
+programming language. `.json`, `.xml`, `.yaml`/`.yml`, `.ini`, and `.properties` each have a
+small parser, and all of them decode into one shared tree (`node`: key, value, comment,
+children). Rendering, sectioning, and redaction are written once against that tree, so a YAML
+file and an XML file describing the same settings produce nearly the same chunk text and a
+query matches either. `.toml` is deferred; `.xhtml` belongs to HTML and cannot collide, since
+`filepath.Ext` returns only the segment after the last dot.
+
+Like the code strategy, `Parse` only normalizes and carries the source, because the format
+parser is chosen from the file extension and `Parse` has no path; the real structuring happens
+in `Chunk`.
+
+**Sectioning is driven by size, not by depth.** Config nests without limit, so mapping nesting
+depth onto heading level does not work. Instead a subtree is serialized and measured: if it
+fits the budget it becomes one section titled with the key path taken to reach it, however deep
+it goes; if not, each child opens a section of its own and the descent continues. Leaves
+sitting beside nested blocks are emitted under the parent's path, so no setting is orphaned.
+
+Two backstops bound the walk. A depth cap (4) stops the path becoming the title past that
+point — the remainder is rendered as body text, so nothing is lost, it just stops being a
+heading. A width cap (200 nested blocks) emits a wide node whole, so a data dump such as a
+sitemap with 50,000 entries cannot explode into as many titled sections.
+
+Comments are kept (`# ...` above the key). They are usually the only natural language a config
+file contains, which makes them the most useful text in it for a meaning-based search. JSON has
+no comment syntax, so it contributes structure alone.
+
+**Values under keys that name a credential are replaced with `[redacted]`** before they leave
+the parser, since indexing sends chunk text to the embedding endpoint and stores it. The key
+stays indexed, so the setting is still findable; only the secret is withheld. Lock files and
+generated output are skipped by name and by banner, as in the code strategy. A file that does
+not parse is still indexed as flat text rather than failing.
+
+Chunking is the shared engine at 350 / 40, with sections kept whole and oversized ones split on
+line boundaries.
+
 ## Token estimation
 
 Approximate, not a real tokenizer: `ceil(runeCount / averageTokenLength)` with

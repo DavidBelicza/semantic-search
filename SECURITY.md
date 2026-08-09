@@ -47,6 +47,10 @@ either sandboxed or done in memory-safe code.
   embedding dimension are ever interpolated into a query string.
 - **Symlinks are not followed by default**, so a symlink planted inside an indexed directory
   cannot pull in files from outside it.
+- **Credentials in config files are redacted.** Config formats are the most likely place in a
+  corpus to hold secrets, so the config strategy replaces values under keys that name one
+  (`password`, `api_key`, `client_secret` and similar) with `[redacted]` before they are
+  embedded or stored. The key stays searchable; the secret does not travel.
 
 ## Operational notes
 
