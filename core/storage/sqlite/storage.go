@@ -9,8 +9,8 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	sqlitemigrations "github.com/davidbelicza/semantic-search/migrations/sqlite"
 	storage "github.com/davidbelicza/semantic-search/core/storage"
+	sqlitemigrations "github.com/davidbelicza/semantic-search/migrations/sqlite"
 )
 
 // Store satisfies storage.Storage.
@@ -20,8 +20,11 @@ type Store struct {
 	db *sql.DB
 }
 
+// openDB is a test seam for supplying a scriptable driver (internal/dbmock).
+var openDB = sql.Open
+
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite3", path)
+	db, err := openDB("sqlite3", path)
 	if err != nil {
 		return nil, err
 	}
@@ -718,4 +721,20 @@ func deleteChunksQuery(chunkIDs []int64) (string, []any) {
 	}
 
 	return "DELETE FROM chunks WHERE id IN (" + strings.Join(placeholders, ", ") + ")", args
+}
+
+// OpenStorage opens the store and prepares its schema, closing it on failure. It returns the
+// interface so a failure yields a nil storage.Storage, not a typed nil.
+func OpenStorage(ctx context.Context, path string) (storage.Storage, error) {
+	store, err := Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := store.EnsureSchema(ctx); err != nil {
+		store.Close()
+		return nil, err
+	}
+
+	return store, nil
 }

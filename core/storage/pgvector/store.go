@@ -28,6 +28,9 @@ type Store struct {
 	hnsw bool
 }
 
+// openDB is a test seam for supplying a scriptable driver (internal/dbmock).
+var openDB = sql.Open
+
 // Open connects to the PostgreSQL database at dsn and ensures the pgvector schema exists. The
 // server must have the pgvector extension available. When hnsw is true an HNSW index is
 // created for approximate search; otherwise search is exact.
@@ -36,7 +39,7 @@ func Open(ctx context.Context, dsn string, dimensions int, hnsw bool) (*Store, e
 		return nil, fmt.Errorf("embedding dimensions are required")
 	}
 
-	db, err := sql.Open("pgx", dsn)
+	db, err := openDB("pgx", dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -205,4 +208,15 @@ func inQuery(prefix string, ids []int64) (string, []any) {
 	}
 
 	return prefix + strings.Join(placeholders, ", ") + ")", args
+}
+
+// OpenVectorStorage opens the vector store; Open already prepares the schema. It returns the
+// interface so a failure yields a nil storage.VectorStorage, not a typed nil.
+func OpenVectorStorage(ctx context.Context, dsn string, dimensions int, hnsw bool) (storage.VectorStorage, error) {
+	store, err := Open(ctx, dsn, dimensions, hnsw)
+	if err != nil {
+		return nil, err
+	}
+
+	return store, nil
 }

@@ -22,10 +22,13 @@ type Store struct {
 	db *sql.DB
 }
 
+// openDB is a test seam for supplying a scriptable driver (internal/dbmock).
+var openDB = sql.Open
+
 // Open connects to the PostgreSQL database at dsn (e.g.
 // "postgres://user:pass@host:5432/db?sslmode=disable").
 func Open(dsn string) (*Store, error) {
-	db, err := sql.Open("pgx", dsn)
+	db, err := openDB("pgx", dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -508,4 +511,20 @@ func inQuery(prefix string, ids []int64) (string, []any) {
 	}
 
 	return prefix + strings.Join(placeholders, ", ") + ")", args
+}
+
+// OpenStorage connects and prepares the schema, closing it on failure. It returns the
+// interface so a failure yields a nil storage.Storage, not a typed nil.
+func OpenStorage(ctx context.Context, dsn string) (storage.Storage, error) {
+	store, err := Open(dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := store.EnsureSchema(ctx); err != nil {
+		store.Close()
+		return nil, err
+	}
+
+	return store, nil
 }

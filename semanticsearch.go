@@ -310,50 +310,21 @@ func NewAiEmbedder(config AiEmbedderConfig, model strategy.EmbeddingModel) strat
 // value is the injectable storage.Storage; a caller can implement that interface instead to
 // use a different backend.
 func NewSQLiteStorage(ctx context.Context, path string) (storage.Storage, error) {
-	store, err := sqlite.Open(path)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := store.EnsureSchema(ctx); err != nil {
-		store.Close()
-		return nil, err
-	}
-
-	return store, nil
+	return sqlite.OpenStorage(ctx, path)
 }
 
 // NewSQLiteVectorStorage opens a sqlite-vec vector store at path, sized to the embedding
 // dimensions, and prepares its schema. Point it at a different path than the metadata store to
 // keep vectors in a separate database.
 func NewSQLiteVectorStorage(ctx context.Context, path string, dimensions int) (storage.VectorStorage, error) {
-	store, err := sqlitevec.Open(ctx, path, dimensions)
-	if err != nil {
-		return nil, err
-	}
-
-	return store, nil
+	return sqlitevec.OpenVectorStorage(ctx, path, dimensions)
 }
 
 // NewPostgresStorage opens a PostgreSQL metadata store at dsn (e.g.
 // "postgres://user:pass@host:5432/db?sslmode=disable") and prepares its schema. It uses the
 // pure-Go pgx driver, so a Postgres-only build needs no cgo.
-// openPostgres opens the metadata store. It is a variable so a test can reach the failure the
-// lazy driver does not produce for a malformed DSN.
-var openPostgres = postgres.Open
-
 func NewPostgresStorage(ctx context.Context, dsn string) (storage.Storage, error) {
-	store, err := openPostgres(dsn)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := store.EnsureSchema(ctx); err != nil {
-		store.Close()
-		return nil, err
-	}
-
-	return store, nil
+	return postgres.OpenStorage(ctx, dsn)
 }
 
 // PostgresVectorIndex selects how the pgvector store searches.
@@ -373,12 +344,7 @@ const (
 // The index selects exact (PostgresKNN) or approximate (PostgresHNSW) search. Point it at a
 // different dsn than the metadata store to keep vectors in a separate database.
 func NewPostgresVectorStorage(ctx context.Context, dsn string, dimensions int, index PostgresVectorIndex) (storage.VectorStorage, error) {
-	store, err := pgvector.Open(ctx, dsn, dimensions, index == PostgresHNSW)
-	if err != nil {
-		return nil, err
-	}
-
-	return store, nil
+	return pgvector.OpenVectorStorage(ctx, dsn, dimensions, index == PostgresHNSW)
 }
 
 // --- Strategies ---
