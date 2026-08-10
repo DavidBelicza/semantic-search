@@ -2,10 +2,14 @@ package sqlite
 
 import (
 	"context"
-	"path/filepath"
+	"errors"
 	"testing"
 
+	"database/sql"
+	"database/sql/driver"
 	"github.com/davidbelicza/semantic-search/core/storage"
+	"github.com/davidbelicza/semantic-search/internal/dbmock"
+	"path/filepath"
 )
 
 func TestEnsureSchemaCreatesDocumentsTable(t *testing.T) {
@@ -529,7 +533,6 @@ func TestSearchAndCleanupQueries(t *testing.T) {
 		t.Fatalf("documents from id: %v %+v", err, all)
 	}
 
-	// Empty inputs hit the early-return guards.
 	if m, err := store.ChunkMetadataByIDs(ctx, nil); err != nil || len(m) != 0 {
 		t.Fatalf("empty metadata: %v %+v", err, m)
 	}
@@ -640,3 +643,432 @@ func TestStoreMethodsErrorOnClosedDB(t *testing.T) {
 }
 
 func second[T any](_ T, err error) error { return err }
+
+var errMock = errors.New("mock failure")
+
+func mockStore(t *testing.T, config dbmock.Config) *Store {
+	t.Helper()
+	db := dbmock.Open(config)
+	t.Cleanup(func() { _ = db.Close() })
+
+	return &Store{db: db}
+}
+
+func schemaRow(createSQL string) dbmock.Response {
+	return dbmock.Response{Columns: []string{"sql"}, Values: [][]driver.Value{{createSQL}}}
+}
+
+func columnRow(name string) dbmock.Response {
+	return dbmock.Response{
+		Columns: []string{"cid", "name", "type", "notnull", "dflt_value", "pk"},
+		Values:  [][]driver.Value{{int64(0), name, "TEXT", int64(0), nil, int64(0)}},
+	}
+}
+
+func ok() dbmock.Response { return dbmock.Response{Result: dbmock.Result{Rows: 1, LastInsertID: 5}} }
+
+func fail() dbmock.Response { return dbmock.Response{Err: errMock} }
+
+const modernSchema = "CREATE TABLE documents (status TEXT CHECK(status IN ('indexed')))"
+const legacySchema = "CREATE TABLE documents (status TEXT CHECK(status IN ('done','failed')))"
+
+func testChunk() storage.Chunk {
+	return storage.Chunk{
+		ID: 1, DocumentID: 2, ChunkIndex: 0, Title: "t", Text: "x",
+		TokenCount: 1, StartOffset: 0, EndOffset: 1, ContentHash: "h",
+	}
+}
+
+func TestOpenReportsAConnectionFailure(t *testing.T) {
+	original := openDB
+	openDB = func(string, string) (*sql.DB, error) { return nil, errMock }
+	defer func() { openDB = original }()
+
+	if _, err := Open("x.db"); !errors.Is(err, errMock) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestOpenReportsAFailingForeignKeyPragma(t *testing.T) {
+	original := openDB
+	openDB = func(string, string) (*sql.DB, error) {
+		return dbmock.Open(dbmock.Config{Fallback: fail()}), nil
+	}
+	defer func() { openDB = original }()
+
+	if _, err := Open("x.db"); !errors.Is(err, errMock) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestEnsureSchemaRunsWhenNoMigrationIsNeeded(t *testing.T) {
+	store := mockStore(t, dbmock.Config{Responses: []dbmock.Response{
+		ok(),
+		schemaRow(modernSchema),
+		columnRow("embedded_content_hash"),
+		columnRow("title"),
+	}})
+
+	if err := store.EnsureSchema(context.Background()); err != nil {
+		t.Fatalf("ensure schema: %v", err)
+	}
+}
+
+func TestEnsureSchemaAddsMissingColumns(t *testing.T) {
+	store := mockStore(t, dbmock.Config{Responses: []dbmock.Response{
+		ok(),
+		schemaRow(modernSchema),
+		columnRow("other"),
+		ok(),
+		columnRow("other"),
+		ok(),
+	}})
+
+	if err := store.EnsureSchema(context.Background()); err != nil {
+		t.Fatalf("ensure schema: %v", err)
+	}
+}
+
+func TestEnsureSchemaReportsEachStepFailure(t *testing.T) {
+	ctx := context.Background()
+
+	schema := mockStore(t, dbmock.Config{Responses: []dbmock.Response{fail()}})
+	if err := schema.EnsureSchema(ctx); !errors.Is(err, errMock) {
+		t.Fatalf("schema: %v", err)
+	}
+
+	status := mockStore(t, dbmock.Config{Responses: []dbmock.Response{ok(), fail()}})
+	if err := status.EnsureSchema(ctx); !errors.Is(err, errMock) {
+		t.Fatalf("status probe: %v", err)
+	}
+
+	embedded := mockStore(t, dbmock.Config{Responses: []dbmock.Response{
+		ok(), schemaRow(modernSchema), columnRow("other"), fail(),
+	}})
+	if err := embedded.EnsureSchema(ctx); !errors.Is(err, errMock) {
+		t.Fatalf("embedded column: %v", err)
+	}
+
+	title := mockStore(t, dbmock.Config{Responses: []dbmock.Response{
+		ok(), schemaRow(modernSchema), columnRow("embedded_content_hash"), columnRow("other"), fail(),
+	}})
+	if err := title.EnsureSchema(ctx); !errors.Is(err, errMock) {
+		t.Fatalf("title column: %v", err)
+	}
+
+	embeddedProbe := mockStore(t, dbmock.Config{Responses: []dbmock.Response{
+		ok(), schemaRow(modernSchema), fail(),
+	}})
+	if err := embeddedProbe.EnsureSchema(ctx); !errors.Is(err, errMock) {
+		t.Fatalf("embedded column probe: %v", err)
+	}
+
+	titleProbe := mockStore(t, dbmock.Config{Responses: []dbmock.Response{
+		ok(), schemaRow(modernSchema), columnRow("embedded_content_hash"), fail(),
+	}})
+	if err := titleProbe.EnsureSchema(ctx); !errors.Is(err, errMock) {
+		t.Fatalf("title column probe: %v", err)
+	}
+}
+
+func TestTableColumnExistsReportsQueryScanAndIterationFailures(t *testing.T) {
+	ctx := context.Background()
+
+	failed := mockStore(t, dbmock.Config{Fallback: fail()})
+	if _, err := failed.tableColumnExists(ctx, "documents", "title"); !errors.Is(err, errMock) {
+		t.Fatalf("query: %v", err)
+	}
+
+	mistyped := mockStore(t, dbmock.Config{Fallback: dbmock.Response{
+		Columns: []string{"cid", "name", "type", "notnull", "dflt_value", "pk"},
+		Values:  [][]driver.Value{{"not-an-int", "title", "TEXT", int64(0), nil, int64(0)}},
+	}})
+	if _, err := mistyped.tableColumnExists(ctx, "chunks", "title"); err == nil {
+		t.Fatal("want a scan failure")
+	}
+
+	broken := mockStore(t, dbmock.Config{Fallback: dbmock.Response{
+		Columns: []string{"cid", "name", "type", "notnull", "dflt_value", "pk"},
+		Values:  [][]driver.Value{{int64(0), "other", "TEXT", int64(0), nil, int64(0)}},
+		IterErr: errMock,
+	}})
+	if _, err := broken.tableColumnExists(ctx, "chunks", "title"); !errors.Is(err, errMock) {
+		t.Fatalf("iteration: %v", err)
+	}
+}
+
+func TestDocumentStatusMigrationRunsAndReportsEachFailure(t *testing.T) {
+	ctx := context.Background()
+
+	full := mockStore(t, dbmock.Config{Responses: []dbmock.Response{
+		ok(), schemaRow(legacySchema), ok(), ok(), ok(), ok(), ok(), ok(),
+		columnRow("embedded_content_hash"), columnRow("title"),
+	}})
+	if err := full.EnsureSchema(ctx); err != nil {
+		t.Fatalf("migration: %v", err)
+	}
+
+	for position, name := range []string{"pragma off", "create", "insert", "drop", "rename"} {
+		responses := []dbmock.Response{ok(), schemaRow(legacySchema)}
+		for i := 0; i < position; i++ {
+			responses = append(responses, ok())
+		}
+		responses = append(responses, fail())
+
+		store := mockStore(t, dbmock.Config{Responses: responses})
+		if err := store.EnsureSchema(ctx); !errors.Is(err, errMock) {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+
+	begin := mockStore(t, dbmock.Config{
+		Responses: []dbmock.Response{ok(), schemaRow(legacySchema)},
+		BeginErr:  errMock,
+	})
+	if err := begin.EnsureSchema(ctx); !errors.Is(err, errMock) {
+		t.Fatalf("begin: %v", err)
+	}
+}
+
+func TestUpsertDocumentsReportsEachFailure(t *testing.T) {
+	ctx := context.Background()
+	files := []storage.FileMetadata{{FileID: "a", AbsolutePath: "/a"}}
+
+	prepare := mockStore(t, dbmock.Config{PrepareErr: errMock, Fallback: ok()})
+	if err := prepare.UpsertDocuments(ctx, files); !errors.Is(err, errMock) {
+		t.Fatalf("prepare: %v", err)
+	}
+
+	exec := mockStore(t, dbmock.Config{Responses: []dbmock.Response{fail()}, Fallback: ok()})
+	if err := exec.UpsertDocuments(ctx, files); !errors.Is(err, errMock) {
+		t.Fatalf("exec: %v", err)
+	}
+
+	commit := mockStore(t, dbmock.Config{CommitErr: errMock, Fallback: ok()})
+	if err := commit.UpsertDocuments(ctx, files); !errors.Is(err, errMock) {
+		t.Fatalf("commit: %v", err)
+	}
+}
+
+func TestDeleteDocumentReportsEachStatementFailure(t *testing.T) {
+	ctx := context.Background()
+
+	chunks := mockStore(t, dbmock.Config{Responses: []dbmock.Response{fail()}, Fallback: ok()})
+	if err := chunks.DeleteDocument(ctx, 1); !errors.Is(err, errMock) {
+		t.Fatalf("chunks: %v", err)
+	}
+
+	documents := mockStore(t, dbmock.Config{Responses: []dbmock.Response{ok(), fail()}, Fallback: ok()})
+	if err := documents.DeleteDocument(ctx, 1); !errors.Is(err, errMock) {
+		t.Fatalf("documents: %v", err)
+	}
+}
+
+func TestUpdateDocumentReportsAFailingRowCountAndAMissingRow(t *testing.T) {
+	ctx := context.Background()
+
+	reportFailure := mockStore(t, dbmock.Config{Fallback: dbmock.Response{
+		Result: dbmock.Result{RowsErr: errMock},
+	}})
+	if err := reportFailure.UpdateDocumentStatus(ctx, "f", "indexed"); !errors.Is(err, errMock) {
+		t.Fatalf("rows affected: %v", err)
+	}
+
+	missing := mockStore(t, dbmock.Config{Fallback: dbmock.Response{Result: dbmock.Result{Rows: 0}}})
+	if err := missing.UpdateDocumentStatus(ctx, "f", "indexed"); err == nil {
+		t.Fatal("want an error when no document matched")
+	}
+}
+
+func TestReadPathsReportScanAndIterationFailures(t *testing.T) {
+	ctx := context.Background()
+
+	cases := []struct {
+		name    string
+		columns []string
+		row     []driver.Value
+		bad     []driver.Value
+		call    func(*Store) error
+	}{
+		{
+			name:    "DocumentsFromID",
+			columns: []string{"id", "absolute_path"},
+			row:     []driver.Value{int64(1), "/a"},
+			bad:     []driver.Value{"x", "/a"},
+			call:    func(s *Store) error { _, err := s.DocumentsFromID(ctx, 0, 10); return err },
+		},
+		{
+			name:    "DocumentsByIDs",
+			columns: []string{"id", "absolute_path"},
+			row:     []driver.Value{int64(1), "/a"},
+			bad:     []driver.Value{"x", "/a"},
+			call:    func(s *Store) error { _, err := s.DocumentsByIDs(ctx, []int64{1}); return err },
+		},
+		{
+			name:    "ChunkDocumentIDs",
+			columns: []string{"id", "document_id"},
+			row:     []driver.Value{int64(1), int64(2)},
+			bad:     []driver.Value{"x", int64(2)},
+			call:    func(s *Store) error { _, err := s.ChunkDocumentIDs(ctx, []int64{1}); return err },
+		},
+		{
+			name:    "ChunkMetadataByIDs",
+			columns: []string{"id", "document_id", "title", "text"},
+			row:     []driver.Value{int64(1), int64(2), "t", "x"},
+			bad:     []driver.Value{"x", int64(2), "t", "x"},
+			call:    func(s *Store) error { _, err := s.ChunkMetadataByIDs(ctx, []int64{1}); return err },
+		},
+		{
+			name: "ChunksByDocumentID",
+			columns: []string{
+				"id", "document_id", "chunk_index", "title", "text",
+				"token_count", "start_offset", "end_offset", "content_hash",
+			},
+			row:  []driver.Value{int64(1), int64(2), int64(0), "t", "x", int64(1), int64(0), int64(1), "h"},
+			bad:  []driver.Value{"x", int64(2), int64(0), "t", "x", int64(1), int64(0), int64(1), "h"},
+			call: func(s *Store) error { _, err := s.ChunksByDocumentID(ctx, 2); return err },
+		},
+		{
+			name: "DocumentsByStatus",
+			columns: []string{
+				"id", "file_id", "absolute_path", "file_size", "modified_at_ns",
+				"content_hash", "scanned_file_size", "scanned_modified_at_ns", "status", "embedded_content_hash",
+			},
+			row: []driver.Value{int64(1), "f", "/a", int64(1), int64(2), nil, nil, nil, "indexed", nil},
+			bad: []driver.Value{"x", "f", "/a", int64(1), int64(2), nil, nil, nil, "indexed", nil},
+			call: func(s *Store) error {
+				_, err := s.DocumentsByStatus(ctx, "indexed", 0, 10)
+				return err
+			},
+		},
+	}
+
+	for _, testCase := range cases {
+		mistyped := mockStore(t, dbmock.Config{Fallback: dbmock.Response{
+			Columns: testCase.columns, Values: [][]driver.Value{testCase.bad},
+		}})
+		if err := testCase.call(mistyped); err == nil {
+			t.Fatalf("%s: want a scan failure", testCase.name)
+		}
+
+		broken := mockStore(t, dbmock.Config{Fallback: dbmock.Response{
+			Columns: testCase.columns, Values: [][]driver.Value{testCase.row}, IterErr: errMock,
+		}})
+		if err := testCase.call(broken); !errors.Is(err, errMock) {
+			t.Fatalf("%s iteration: %v", testCase.name, err)
+		}
+	}
+}
+
+func TestApplyDocumentChunkReconcileRunsTheWholePlan(t *testing.T) {
+	store := mockStore(t, dbmock.Config{Fallback: ok()})
+
+	inserted, err := store.ApplyDocumentChunkReconcile(context.Background(), 2, storage.ChunkReconcilePlan{
+		RemoveIDs: []int64{9},
+		Keep:      []storage.Chunk{testChunk()},
+		Insert:    []storage.Chunk{testChunk()},
+	})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(inserted) != 1 || inserted[0].ID != 5 || inserted[0].DocumentID != 2 {
+		t.Fatalf("got %+v", inserted)
+	}
+}
+
+func TestApplyDocumentChunkReconcileReportsEachStatementFailure(t *testing.T) {
+	ctx := context.Background()
+	plan := storage.ChunkReconcilePlan{
+		RemoveIDs: []int64{9},
+		Keep:      []storage.Chunk{testChunk()},
+		Insert:    []storage.Chunk{testChunk()},
+	}
+
+	begin := mockStore(t, dbmock.Config{BeginErr: errMock, Fallback: ok()})
+	if _, err := begin.ApplyDocumentChunkReconcile(ctx, 2, plan); !errors.Is(err, errMock) {
+		t.Fatalf("begin: %v", err)
+	}
+
+	for position, name := range []string{"delete", "park", "update", "insert"} {
+		responses := make([]dbmock.Response, 0, position+1)
+		for i := 0; i < position; i++ {
+			responses = append(responses, ok())
+		}
+		responses = append(responses, fail())
+
+		store := mockStore(t, dbmock.Config{Responses: responses, Fallback: ok()})
+		if _, err := store.ApplyDocumentChunkReconcile(ctx, 2, plan); !errors.Is(err, errMock) {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+
+	commit := mockStore(t, dbmock.Config{CommitErr: errMock, Fallback: ok()})
+	if _, err := commit.ApplyDocumentChunkReconcile(ctx, 2, plan); !errors.Is(err, errMock) {
+		t.Fatalf("commit: %v", err)
+	}
+
+	for position, name := range []string{"update", "park", "insert"} {
+		errs := make([]error, position+1)
+		errs[position] = errMock
+
+		store := mockStore(t, dbmock.Config{PrepareErrs: errs, Fallback: ok()})
+		if _, err := store.ApplyDocumentChunkReconcile(ctx, 2, plan); !errors.Is(err, errMock) {
+			t.Fatalf("%s prepare: %v", name, err)
+		}
+	}
+}
+
+func TestApplyDocumentChunkReconcileReportsAFailingInsertID(t *testing.T) {
+	store := mockStore(t, dbmock.Config{Fallback: dbmock.Response{
+		Result: dbmock.Result{LastInsertIDErr: errMock},
+	}})
+
+	_, err := store.ApplyDocumentChunkReconcile(context.Background(), 2, storage.ChunkReconcilePlan{
+		Insert: []storage.Chunk{testChunk()},
+	})
+	if !errors.Is(err, errMock) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestOpenStorageOpensAndPreparesTheSchema(t *testing.T) {
+	store, err := OpenStorage(context.Background(), filepath.Join(t.TempDir(), "index.db"))
+	if err != nil {
+		t.Fatalf("open storage: %v", err)
+	}
+	defer store.Close()
+
+	if store == nil {
+		t.Fatal("want a store")
+	}
+}
+
+func TestOpenStorageReportsAnOpenFailure(t *testing.T) {
+	original := openDB
+	openDB = func(string, string) (*sql.DB, error) { return nil, errMock }
+	defer func() { openDB = original }()
+
+	store, err := OpenStorage(context.Background(), "x.db")
+	if !errors.Is(err, errMock) {
+		t.Fatalf("got %v", err)
+	}
+	if store != nil {
+		t.Fatal("a failure must yield a nil storage.Storage, not a typed nil")
+	}
+}
+
+func TestOpenStorageReportsASchemaFailureAndReleasesTheHandle(t *testing.T) {
+	original := openDB
+	openDB = func(string, string) (*sql.DB, error) {
+		return dbmock.Open(dbmock.Config{Responses: []dbmock.Response{ok(), fail()}}), nil
+	}
+	defer func() { openDB = original }()
+
+	store, err := OpenStorage(context.Background(), "x.db")
+	if !errors.Is(err, errMock) {
+		t.Fatalf("got %v", err)
+	}
+	if store != nil {
+		t.Fatal("want a nil storage.Storage")
+	}
+}

@@ -2,10 +2,14 @@ package sqlitevec
 
 import (
 	"context"
-	"path/filepath"
+	"errors"
 	"testing"
 
+	"database/sql"
+	"database/sql/driver"
 	"github.com/davidbelicza/semantic-search/core/storage"
+	"github.com/davidbelicza/semantic-search/internal/dbmock"
+	"path/filepath"
 )
 
 func openTestStore(t *testing.T) *Store {
@@ -56,7 +60,7 @@ func TestReplaceUpsertsExistingChunk(t *testing.T) {
 	if err := store.Replace(ctx, []storage.ChunkEmbedding{{ChunkID: 1, Vector: []float32{1, 0, 0}}}); err != nil {
 		t.Fatalf("first replace: %v", err)
 	}
-	// Re-embed chunk 1 to point the other way; the old row must be gone.
+
 	if err := store.Replace(ctx, []storage.ChunkEmbedding{{ChunkID: 1, Vector: []float32{0, 0, 1}}}); err != nil {
 		t.Fatalf("second replace: %v", err)
 	}
@@ -175,5 +179,166 @@ func TestStoreMethodsErrorOnClosedDB(t *testing.T) {
 	}
 	if _, err := store.Search(ctx, []float32{1, 0, 0}, 5); err == nil {
 		t.Error("Search: expected an error on a closed database")
+	}
+}
+
+var errMock = errors.New("mock failure")
+
+func mockStore(t *testing.T, config dbmock.Config, dimensions int) *Store {
+	t.Helper()
+	db := dbmock.Open(config)
+	t.Cleanup(func() { _ = db.Close() })
+
+	return &Store{db: db, dimensions: dimensions}
+}
+
+func withOpenDB(t *testing.T, config dbmock.Config, openErr error) {
+	t.Helper()
+	original := openDB
+	openDB = func(string, string) (*sql.DB, error) {
+		if openErr != nil {
+			return nil, openErr
+		}
+
+		return dbmock.Open(config), nil
+	}
+	t.Cleanup(func() { openDB = original })
+}
+
+func withFailingSerializer(t *testing.T) {
+	t.Helper()
+	original := serializeVector
+	serializeVector = func([]float32) ([]byte, error) { return nil, errMock }
+	t.Cleanup(func() { serializeVector = original })
+}
+
+func TestOpenReportsAConnectionFailure(t *testing.T) {
+	withOpenDB(t, dbmock.Config{}, errMock)
+
+	if _, err := Open(context.Background(), "x.db", 8); !errors.Is(err, errMock) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestOpenReportsASchemaFailureAndClosesTheHandle(t *testing.T) {
+	withOpenDB(t, dbmock.Config{Fallback: dbmock.Response{Err: errMock}}, nil)
+
+	if _, err := Open(context.Background(), "x.db", 8); !errors.Is(err, errMock) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestDSNAppendsTheBusyTimeoutToEitherFormOfPath(t *testing.T) {
+	if got := dsn("/tmp/a.db"); got != "/tmp/a.db?_busy_timeout=5000" {
+		t.Fatalf("got %q", got)
+	}
+	if got := dsn("/tmp/a.db?cache=shared"); got != "/tmp/a.db?cache=shared&_busy_timeout=5000" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestReplaceReportsTransactionFailures(t *testing.T) {
+	ctx := context.Background()
+	embeddings := []storage.ChunkEmbedding{{ChunkID: 1, Vector: []float32{1, 2, 3}}}
+
+	begin := mockStore(t, dbmock.Config{BeginErr: errMock}, 3)
+	if err := begin.Replace(ctx, embeddings); !errors.Is(err, errMock) {
+		t.Fatalf("begin: %v", err)
+	}
+
+	del := mockStore(t, dbmock.Config{Responses: []dbmock.Response{{Err: errMock}}}, 3)
+	if err := del.Replace(ctx, embeddings); !errors.Is(err, errMock) {
+		t.Fatalf("delete: %v", err)
+	}
+
+	insert := mockStore(t, dbmock.Config{Responses: []dbmock.Response{{}, {Err: errMock}}}, 3)
+	if err := insert.Replace(ctx, embeddings); !errors.Is(err, errMock) {
+		t.Fatalf("insert: %v", err)
+	}
+
+	prepare := mockStore(t, dbmock.Config{PrepareErr: errMock}, 3)
+	if err := prepare.Replace(ctx, embeddings); !errors.Is(err, errMock) {
+		t.Fatalf("prepare: %v", err)
+	}
+
+	commit := mockStore(t, dbmock.Config{CommitErr: errMock}, 3)
+	if err := commit.Replace(ctx, embeddings); !errors.Is(err, errMock) {
+		t.Fatalf("commit: %v", err)
+	}
+}
+
+func TestReplaceReportsASerializationFailure(t *testing.T) {
+	withFailingSerializer(t)
+	store := mockStore(t, dbmock.Config{}, 3)
+
+	err := store.Replace(context.Background(), []storage.ChunkEmbedding{{ChunkID: 1, Vector: []float32{1, 2, 3}}})
+	if !errors.Is(err, errMock) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestSearchReturnsNothingForANonPositiveLimit(t *testing.T) {
+	store := mockStore(t, dbmock.Config{}, 3)
+
+	hits, err := store.Search(context.Background(), []float32{1, 2, 3}, 0)
+	if err != nil || hits != nil {
+		t.Fatalf("got %v %v", hits, err)
+	}
+}
+
+func TestSearchReportsASerializationFailure(t *testing.T) {
+	withFailingSerializer(t)
+	store := mockStore(t, dbmock.Config{}, 3)
+
+	if _, err := store.Search(context.Background(), []float32{1, 2, 3}, 5); !errors.Is(err, errMock) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestSearchReportsScanAndIterationFailures(t *testing.T) {
+	ctx := context.Background()
+	query := []float32{1, 2, 3}
+
+	mistyped := mockStore(t, dbmock.Config{Fallback: dbmock.Response{
+		Columns: []string{"chunk_id", "distance"},
+		Values:  [][]driver.Value{{"not-an-id", 0.5}},
+	}}, 3)
+	if _, err := mistyped.Search(ctx, query, 5); err == nil {
+		t.Fatal("want a scan failure")
+	}
+
+	broken := mockStore(t, dbmock.Config{Fallback: dbmock.Response{
+		Columns: []string{"chunk_id", "distance"},
+		Values:  [][]driver.Value{{int64(1), 0.5}},
+		IterErr: errMock,
+	}}, 3)
+	if _, err := broken.Search(ctx, query, 5); !errors.Is(err, errMock) {
+		t.Fatalf("iteration: %v", err)
+	}
+}
+
+func TestOpenVectorStorageOpensTheStore(t *testing.T) {
+	withOpenDB(t, dbmock.Config{}, nil)
+
+	store, err := OpenVectorStorage(context.Background(), "x.db", 8)
+	if err != nil {
+		t.Fatalf("open vector storage: %v", err)
+	}
+	defer store.Close()
+
+	if store == nil {
+		t.Fatal("want a store")
+	}
+}
+
+func TestOpenVectorStorageReportsAFailure(t *testing.T) {
+	withOpenDB(t, dbmock.Config{}, errMock)
+
+	store, err := OpenVectorStorage(context.Background(), "x.db", 8)
+	if !errors.Is(err, errMock) {
+		t.Fatalf("got %v", err)
+	}
+	if store != nil {
+		t.Fatal("a failure must yield a nil storage.VectorStorage, not a typed nil")
 	}
 }

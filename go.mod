@@ -9,6 +9,7 @@ require (
 	github.com/klippa-app/go-pdfium v1.19.4
 	github.com/mattn/go-sqlite3 v1.14.47
 	github.com/yuin/goldmark v1.8.2
+	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/net v0.55.0
 )
 
@@ -19,6 +20,8 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jolestar/go-commons-pool/v2 v2.1.2 // indirect
+	github.com/kr/text v0.2.0 // indirect
+	github.com/rogpeppe/go-internal v1.16.0 // indirect
 	github.com/tetratelabs/wazero v1.12.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect

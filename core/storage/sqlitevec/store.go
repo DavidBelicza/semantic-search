@@ -39,6 +39,12 @@ type Store struct {
 	dimensions int
 }
 
+// serializeVector is a test seam; SerializeFloat32 does not fail in practice.
+var serializeVector = sqlite_vec.SerializeFloat32
+
+// openDB is a test seam for supplying a scriptable driver (internal/dbmock).
+var openDB = sql.Open
+
 // Open connects to the SQLite database at path and ensures the vec0 vector table
 // exists. The vectors live in the same file as the documents/chunks tables.
 func Open(ctx context.Context, path string, dimensions int) (*Store, error) {
@@ -46,7 +52,7 @@ func Open(ctx context.Context, path string, dimensions int) (*Store, error) {
 		return nil, fmt.Errorf("embedding dimensions are required")
 	}
 
-	db, err := sql.Open("sqlite3", dsn(path))
+	db, err := openDB("sqlite3", dsn(path))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite-vec database: %w", err)
 	}
@@ -128,7 +134,7 @@ func insertEmbeddings(ctx context.Context, tx *sql.Tx, embeddings []storage.Chun
 	defer stmt.Close()
 
 	for _, embedding := range embeddings {
-		blob, err := sqlite_vec.SerializeFloat32(normalize(embedding.Vector))
+		blob, err := serializeVector(normalize(embedding.Vector))
 		if err != nil {
 			return fmt.Errorf("serialize vector for chunk %d: %w", embedding.ChunkID, err)
 		}
@@ -150,7 +156,7 @@ func (s *Store) Search(ctx context.Context, query []float32, limit int) ([]stora
 		return nil, fmt.Errorf("query dimension mismatch: configured %d, got %d", s.dimensions, len(query))
 	}
 
-	blob, err := sqlite_vec.SerializeFloat32(normalize(query))
+	blob, err := serializeVector(normalize(query))
 	if err != nil {
 		return nil, fmt.Errorf("serialize query vector: %w", err)
 	}
@@ -241,4 +247,15 @@ func normalize(vector []float32) []float32 {
 	}
 
 	return normalized
+}
+
+// OpenVectorStorage opens the vector store; Open already prepares the schema. It returns the
+// interface so a failure yields a nil storage.VectorStorage, not a typed nil.
+func OpenVectorStorage(ctx context.Context, path string, dimensions int) (storage.VectorStorage, error) {
+	store, err := Open(ctx, path, dimensions)
+	if err != nil {
+		return nil, err
+	}
+
+	return store, nil
 }

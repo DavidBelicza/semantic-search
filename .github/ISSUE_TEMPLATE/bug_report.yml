@@ -1,0 +1,64 @@
+name: Bug report
+description: Something does not work as documented
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to reproduce
+      description: >
+        The smallest steps or code that show the problem. A failing test is ideal.
+        If a particular file broke the indexing, attach it or a trimmed version.
+      render: go
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Library version
+      placeholder: v1.6.0
+    validations:
+      required: true
+
+  - type: input
+    id: go-version
+    attributes:
+      label: Go version and OS
+      placeholder: go1.26.4, macOS 15 arm64
+    validations:
+      required: true
+
+  - type: dropdown
+    id: storage
+    attributes:
+      label: Storage
+      options:
+        - SQLite and sqlite-vec
+        - PostgreSQL and pgvector
+        - Both
+        - Not relevant
+    validations:
+      required: true
+
+  - type: input
+    id: embedder
+    attributes:
+      label: Embedding server and model
+      description: Leave blank if the problem happens before any embedding call.
+      placeholder: LM Studio, text-embedding-embeddinggemma-300m-qat
+
+  - type: input
+    id: format
+    attributes:
+      label: File format involved
+      description: The extension being indexed, if the problem is format specific.
+      placeholder: .yaml

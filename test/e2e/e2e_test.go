@@ -87,6 +87,7 @@ func newEngine(t *testing.T, store storage.Storage, vectors storage.VectorStorag
 			semanticsearch.NewCodeStrategy(),
 			semanticsearch.NewDocxStrategy(),
 			semanticsearch.NewHTMLStrategy(),
+			semanticsearch.NewConfigStrategy(),
 		},
 	})
 	if err != nil {
@@ -97,7 +98,7 @@ func newEngine(t *testing.T, store storage.Storage, vectors storage.VectorStorag
 }
 
 // assertRetrieval indexes the fixtures and checks that each query's top result comes from the
-// expected file, across all five formats.
+// expected file, across all six formats.
 func assertRetrieval(t *testing.T, engine *semanticsearch.Engine, dir string) {
 	t.Helper()
 	ctx := context.Background()
@@ -115,6 +116,7 @@ func assertRetrieval(t *testing.T, engine *semanticsearch.Engine, dir string) {
 		{"read the configuration file from disk", "config"},          // → loader.go
 		{"working remotely from home policy", "remote"},              // → handbook.docx
 		{"store the passphrase in the company vault", "passphrase"},  // → security.html
+		{"hostname of the reporting warehouse", "warehouse"},         // → service.yaml
 	}
 
 	for _, tc := range cases {
@@ -130,6 +132,7 @@ func assertRetrieval(t *testing.T, engine *semanticsearch.Engine, dir string) {
 			t.Errorf("query %q: want top result containing %q, got title=%q text=%q", tc.query, tc.want, top.Title, top.Text)
 		}
 	}
+
 }
 
 // resetPostgres drops the tables the stores use so each run starts clean.
@@ -201,6 +204,12 @@ func writeFixtures(t *testing.T, dir string) {
 		`<main><h1>Security</h1><h2>Passwords</h2>`+
 		`<p>Choose a passphrase of at least sixteen characters and store it in the company vault.</p></main>`+
 		`<script>var tracking = "ignore me";</script></body></html>`)
+	// The comment carries the natural language a config file has, which is what the query below
+	// matches on.
+	write(t, dir, "service.yaml", "# Connection settings for the reporting warehouse\n"+
+		"warehouse:\n"+
+		"  hostname: analytics.internal\n"+
+		"  pool_size: 20\n")
 }
 
 func write(t *testing.T, dir, name, content string) {

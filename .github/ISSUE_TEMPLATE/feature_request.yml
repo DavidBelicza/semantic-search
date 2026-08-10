@@ -1,0 +1,21 @@
+name: Feature or format request
+description: Suggest a capability, or support for a new file format
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like
+      description: >
+        For a new file format, say which extensions and roughly how a file of that type should
+        be split into chunks. See docs/chunking.md for how the existing formats do it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: What are you trying to do
+      description: The problem behind the request, so a different solution can be considered.
+    validations:
+      required: true

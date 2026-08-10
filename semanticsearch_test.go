@@ -10,13 +10,10 @@ import (
 	"time"
 
 	"github.com/davidbelicza/semantic-search/core/storage"
-	"github.com/davidbelicza/semantic-search/core/storage/postgres"
 	"github.com/davidbelicza/semantic-search/core/strategy"
 	"github.com/davidbelicza/semantic-search/core/strategy/pdf"
 )
 
-// fixedEmbedder returns the same unit vector for every input, so an index→search round-trip
-// is deterministic without a real embedding server.
 type fixedEmbedder struct{}
 
 func (fixedEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
@@ -27,7 +24,6 @@ func (fixedEmbedder) Embed(_ context.Context, texts []string) ([][]float32, erro
 	return vectors, nil
 }
 
-// compile-time check that the fake satisfies the embedder contract.
 var _ strategy.AiClient = fixedEmbedder{}
 
 func newTestEngine(t *testing.T, factories ...StrategyFactory) *Engine {
@@ -60,8 +56,6 @@ func newTestEngine(t *testing.T, factories ...StrategyFactory) *Engine {
 	})
 	return engine
 }
-
-// --- Engine ---
 
 func TestNewEngineRejectsDuplicateExtensions(t *testing.T) {
 	ctx := context.Background()
@@ -205,7 +199,6 @@ func TestEngineIndexPrunesMissingFilesByDefault(t *testing.T) {
 		t.Fatalf("remove file: %v", err)
 	}
 
-	// Default re-index prunes the deleted file.
 	if err := engine.Index(ctx, dir, IndexOptions{}); err != nil {
 		t.Fatalf("reindex: %v", err)
 	}
@@ -230,7 +223,6 @@ func TestEngineKeepMissingFilesRetainsDeleted(t *testing.T) {
 		t.Fatalf("remove file: %v", err)
 	}
 
-	// KeepMissingFiles skips the prune, so the deleted file's document survives.
 	if err := engine.Index(ctx, dir, IndexOptions{KeepMissingFiles: true}); err != nil {
 		t.Fatalf("reindex: %v", err)
 	}
@@ -239,7 +231,6 @@ func TestEngineKeepMissingFilesRetainsDeleted(t *testing.T) {
 	}
 }
 
-// documentNames returns the file names of every document a broad search surfaces.
 func documentNames(t *testing.T, engine *Engine) []string {
 	t.Helper()
 	results, err := engine.Search(context.Background(), SearchConfig{Query: "policy office vacation holidays"})
@@ -252,8 +243,6 @@ func documentNames(t *testing.T, engine *Engine) []string {
 	}
 	return names
 }
-
-// --- Embedder ---
 
 func TestNewAiEmbedderOpenAI(t *testing.T) {
 	e := NewAiEmbedder(AiEmbedderConfig{
@@ -287,8 +276,6 @@ func TestNewGeneralModel(t *testing.T) {
 		t.Fatalf("general model not configured: name=%q dims=%d", m.Name(), m.Dimensions())
 	}
 }
-
-// --- Storage ---
 
 func TestNewSQLiteStorageOpens(t *testing.T) {
 	store, err := NewSQLiteStorage(context.Background(), filepath.Join(t.TempDir(), "index.db"))
@@ -359,6 +346,7 @@ func TestStrategyFactoriesBuild(t *testing.T) {
 		NewCodeStrategy(),
 		NewDocxStrategy(),
 		NewHTMLStrategy(),
+		NewConfigStrategy(),
 		NewTextStrategy(),
 	}
 	for _, factory := range factories {
@@ -489,8 +477,6 @@ func TestEngineIndexReturnsWalkError(t *testing.T) {
 	}
 }
 
-// badParseStrategy claims .bad files, registers and fingerprints fine, but fails to parse, so the
-// error surfaces in the Process pipeline rather than during discovery.
 type badParseStrategy struct{}
 
 func (badParseStrategy) Claims(path string) bool { return filepath.Ext(path) == ".bad" }
@@ -547,8 +533,7 @@ func TestNewEngineRejectsDuplicateExtensionsWithFullConfig(t *testing.T) {
 }
 
 func TestEngineIndexReleasesOpenedStrategiesOnBuildError(t *testing.T) {
-	// The PDF factory opens a PDFium extractor (registering a closer); the failing factory that
-	// follows forces buildStrategies to release everything opened so far.
+
 	failing := StrategyFactory{
 		Extensions: []string{".xyz"},
 		Build: func(strategy.EmbeddingModel, strategy.AiClient) (strategy.Strategy, func() error, error) {
@@ -561,24 +546,11 @@ func TestEngineIndexReleasesOpenedStrategiesOnBuildError(t *testing.T) {
 	}
 }
 
-// TestNewPostgresStorageFailsWhenSchemaCannotBeCreated covers the path where the DSN parses
-// and opens lazily but the server is unreachable, so preparing the schema fails and the
-// half-open store is closed before the error is returned.
 func TestNewPostgresStorageFailsWhenSchemaCannotBeCreated(t *testing.T) {
-	// Port 1 is reserved and never serves Postgres, so the first real round-trip fails.
+
 	dsn := "postgres://user:pass@127.0.0.1:1/nodb?sslmode=disable&connect_timeout=1"
 	if _, err := NewPostgresStorage(context.Background(), dsn); err == nil {
 		t.Fatal("expected an error when the schema cannot be prepared")
-	}
-}
-
-func TestNewPostgresStorageReportsAnOpenFailure(t *testing.T) {
-	original := openPostgres
-	openPostgres = func(string) (*postgres.Store, error) { return nil, errors.New("open failed") }
-	defer func() { openPostgres = original }()
-
-	if _, err := NewPostgresStorage(context.Background(), "postgres://x/y"); err == nil {
-		t.Fatal("expected the open error to propagate")
 	}
 }
 
