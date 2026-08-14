@@ -336,6 +336,44 @@ func TestNewModelPredefinedConstants(t *testing.T) {
 	}
 }
 
+func TestEngineIndexesSubtitleFiles(t *testing.T) {
+	dir := t.TempDir()
+	captions := "WEBVTT\n\nNOTE studio recording\n\n" +
+		"opening\n00:00:01.000 --> 00:00:04.000\n<v Guide>The vacation policy grants\nfifteen paid days.\n\n" +
+		"00:00:04.000 --> 00:00:06.000\n{\\an8}Approval is automatic.\n"
+	if err := os.WriteFile(filepath.Join(dir, "briefing.vtt"), []byte(captions), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	engine := newTestEngine(t, NewSubtitleStrategy())
+	ctx := context.Background()
+
+	if err := engine.Index(ctx, dir, IndexOptions{FailFast: true}); err != nil {
+		t.Fatalf("index: %v", err)
+	}
+
+	results, err := engine.Search(ctx, SearchConfig{Query: "vacation"})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 1 || results[0].FileName != "briefing.vtt" {
+		t.Fatalf("expected the subtitle document indexed, got %#v", results)
+	}
+
+	chunk := results[0].Chunks[0]
+	if chunk.Title != "briefing" {
+		t.Fatalf("chunk title should fall back to the file name, got %q", chunk.Title)
+	}
+	for _, dropped := range []string{"-->", "WEBVTT", "studio recording", "opening", "<v", `{\an8}`} {
+		if strings.Contains(chunk.Text, dropped) {
+			t.Fatalf("expected %q dropped from the indexed text, got %q", dropped, chunk.Text)
+		}
+	}
+	if chunk.Text != "The vacation policy grants\nfifteen paid days.\nApproval is automatic." {
+		t.Fatalf("expected the spoken lines kept as written, got %q", chunk.Text)
+	}
+}
+
 func TestStrategyFactoriesBuild(t *testing.T) {
 	model := NewModel(Gemma300mQAT)
 	embedder := fixedEmbedder{}
@@ -347,6 +385,7 @@ func TestStrategyFactoriesBuild(t *testing.T) {
 		NewDocxStrategy(),
 		NewHTMLStrategy(),
 		NewConfigStrategy(),
+		NewSubtitleStrategy(),
 		NewTextStrategy(),
 	}
 	for _, factory := range factories {
