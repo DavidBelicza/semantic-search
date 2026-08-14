@@ -88,6 +88,7 @@ func newEngine(t *testing.T, store storage.Storage, vectors storage.VectorStorag
 			semanticsearch.NewDocxStrategy(),
 			semanticsearch.NewHTMLStrategy(),
 			semanticsearch.NewConfigStrategy(),
+			semanticsearch.NewSubtitleStrategy(),
 		},
 	})
 	if err != nil {
@@ -98,7 +99,7 @@ func newEngine(t *testing.T, store storage.Storage, vectors storage.VectorStorag
 }
 
 // assertRetrieval indexes the fixtures and checks that each query's top result comes from the
-// expected file, across all six formats.
+// expected file, across all eight formats.
 func assertRetrieval(t *testing.T, engine *semanticsearch.Engine, dir string) {
 	t.Helper()
 	ctx := context.Background()
@@ -111,12 +112,14 @@ func assertRetrieval(t *testing.T, engine *semanticsearch.Engine, dir string) {
 		query string
 		want  string // a distinctive word expected in the top result
 	}{
-		{"how many paid vacation days do employees get", "vacation"}, // → vacation.txt
-		{"refund to the original payment method", "refund"},          // → billing.md
-		{"read the configuration file from disk", "config"},          // → loader.go
-		{"working remotely from home policy", "remote"},              // → handbook.docx
-		{"store the passphrase in the company vault", "passphrase"},  // → security.html
-		{"hostname of the reporting warehouse", "warehouse"},         // → service.yaml
+		{"how many paid vacation days do employees get", "vacation"},   // → vacation.txt
+		{"refund to the original payment method", "refund"},            // → billing.md
+		{"read the configuration file from disk", "config"},            // → loader.go
+		{"working remotely from home policy", "remote"},                // → handbook.docx
+		{"store the passphrase in the company vault", "passphrase"},    // → security.html
+		{"hostname of the reporting warehouse", "warehouse"},           // → service.yaml
+		{"how far does the glacier retreat each summer", "glacier"},    // → lecture.srt
+		{"how often should the sourdough starter be fed", "sourdough"}, // → interview.vtt
 	}
 
 	for _, tc := range cases {
@@ -133,6 +136,30 @@ func assertRetrieval(t *testing.T, engine *semanticsearch.Engine, dir string) {
 		}
 	}
 
+	assertSubtitleMetadataStripped(t, engine)
+}
+
+func assertSubtitleMetadataStripped(t *testing.T, engine *semanticsearch.Engine) {
+	t.Helper()
+	ctx := context.Background()
+
+	results, err := engine.Search(ctx, semanticsearch.SearchConfig{Query: "how often should the sourdough starter be fed"})
+	if err != nil {
+		t.Fatalf("search subtitle: %v", err)
+	}
+	if len(results) == 0 || len(results[0].Chunks) == 0 {
+		t.Fatalf("subtitle query: no results")
+	}
+
+	text := results[0].Chunks[0].Text
+	for _, unwanted := range []string{"-->", "<v", "<i>", `{\an8}`, "WEBVTT", "kitchen studio", "opening"} {
+		if strings.Contains(text, unwanted) {
+			t.Errorf("subtitle chunk still carries %q: %q", unwanted, text)
+		}
+	}
+	if strings.Contains(text, "\n\n") {
+		t.Errorf("subtitle chunk has a blank line: %q", text)
+	}
 }
 
 // resetPostgres drops the tables the stores use so each run starts clean.
@@ -210,6 +237,11 @@ func writeFixtures(t *testing.T, dir string) {
 		"warehouse:\n"+
 		"  hostname: analytics.internal\n"+
 		"  pool_size: 20\n")
+	write(t, dir, "lecture.srt", "1\n00:00:01,000 --> 00:00:04,000\nThe glacier retreats about twelve\nmetres every summer.\n\n"+
+		"2\n00:00:04,500 --> 00:00:07,000\nMeltwater collects in a lagoon below.\n")
+	write(t, dir, "interview.vtt", "WEBVTT\n\nNOTE recorded in the kitchen studio\n\n"+
+		"opening\n00:00:02.000 --> 00:00:06.000\n<v Baker>You feed the <i>sourdough</i> starter twice a day.\n\n"+
+		"00:00:06.500 --> 00:00:09.000\n{\\an8}Warm water works best.\n")
 }
 
 func write(t *testing.T, dir, name, content string) {

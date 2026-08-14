@@ -75,6 +75,7 @@ on disk or in memory) and as a server-side knowledge base (using PostgreSQL and 
 | DOCX | `.docx` | Split by Word heading styles |
 | HTML | `.html`, `.htm`, `.xhtml` | Text extracted from the HTML and split by `<h1>`-`<h6>` headings, with scripts, styles, and navigation dropped |
 | Config | `.json`, `.xml`, `.yaml`, `.yml`, `.ini`, `.properties` | Split by key path, so each chunk is titled with the setting it holds; comments are kept |
+| Subtitles | `.srt`, `.vtt` | The full dialogue becomes searchable text, split into chunks, so a film or talk reads like a book you can search by meaning |
 
 ## How it works
 
@@ -229,6 +230,7 @@ func main() {
 			semanticsearch.NewDocxStrategy(),
 			semanticsearch.NewHTMLStrategy(),
 			semanticsearch.NewConfigStrategy(),
+			semanticsearch.NewSubtitleStrategy(),
 			semanticsearch.NewTextStrategy(),
 		},
 	})
