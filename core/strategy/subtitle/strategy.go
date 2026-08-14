@@ -28,7 +28,7 @@ func (subtitleStrategy) Claims(path string) bool {
 	}
 }
 
-// Parse merges the dialogue of every cue into one transcript section.
+// Parse keeps the spoken lines, one per line, as a single transcript section.
 func (subtitleStrategy) Parse(content []byte) (strategy.ParsedDocument, error) {
 	transcript := buildTranscript(textproc.NormalizeText(content))
 	if transcript == "" {

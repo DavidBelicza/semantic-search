@@ -28,6 +28,7 @@ import (
 	"github.com/davidbelicza/semantic-search/core/strategy/html"
 	"github.com/davidbelicza/semantic-search/core/strategy/markdown"
 	"github.com/davidbelicza/semantic-search/core/strategy/pdf"
+	"github.com/davidbelicza/semantic-search/core/strategy/subtitle"
 	"github.com/davidbelicza/semantic-search/internal/pipeline"
 )
 
@@ -428,6 +429,17 @@ func NewConfigStrategy() StrategyFactory {
 		Extensions: []string{".json", ".xml", ".yaml", ".yml", ".ini", ".properties"},
 		Build: func(model strategy.EmbeddingModel, embedder strategy.AiClient) (strategy.Strategy, func() error, error) {
 			return configstrategy.NewConfigStrategy(general.NewGeneralStrategy(model, embedder)), nil, nil
+		},
+	}
+}
+
+// NewSubtitleStrategy registers the subtitle strategy (SubRip and WebVTT). It indexes cue
+// dialogue as one transcript.
+func NewSubtitleStrategy() StrategyFactory {
+	return StrategyFactory{
+		Extensions: []string{".srt", ".vtt"},
+		Build: func(model strategy.EmbeddingModel, embedder strategy.AiClient) (strategy.Strategy, func() error, error) {
+			return subtitle.NewSubtitleStrategy(general.NewGeneralStrategy(model, embedder)), nil, nil
 		},
 	}
 }

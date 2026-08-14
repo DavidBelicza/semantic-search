@@ -20,7 +20,7 @@ Status: **done** / **todo** (partial = base exists, needs wiring).
 | CSV / TSV | `.csv`, `.tsv` | P2 | todo | stdlib `encoding/csv` |
 | XLSX | `.xlsx` | P3 | todo | `github.com/xuri/excelize/v2` (BSD); or stdlib `archive/zip` + `encoding/xml` |
 | EPUB | `.epub` | P3 | todo | stdlib `archive/zip` + `golang.org/x/net/html`; alt `github.com/taylorskalyo/goreader` |
-| Subtitles | `.srt`, `.vtt` | P3 | todo | stdlib only |
+| Subtitles | `.srt`, `.vtt` | - | done | stdlib only (spoken lines kept in file order, one transcript section) |
 
 ## Facade configuration roadmap
 

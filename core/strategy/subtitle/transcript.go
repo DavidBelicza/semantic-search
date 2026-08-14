@@ -14,31 +14,23 @@ var (
 )
 
 func buildTranscript(source string) string {
-	var dialogue []string
-	previous := ""
-
+	var spoken []string
 	for _, block := range blockBoundary.Split(source, -1) {
-		spoken := cueDialogue(block)
-		if spoken == "" || spoken == previous {
-			continue
-		}
-
-		dialogue = append(dialogue, spoken)
-		previous = spoken
+		spoken = append(spoken, spokenLines(block)...)
 	}
 
-	return strings.Join(dialogue, " ")
+	return strings.Join(spoken, "\n")
 }
 
-func cueDialogue(block string) string {
+func spokenLines(block string) []string {
 	lines := strings.Split(block, "\n")
 
 	timing := timingLineIndex(lines)
 	if timing < 0 {
-		return ""
+		return nil
 	}
 
-	return cleanDialogue(lines[timing+1:])
+	return cleanLines(lines[timing+1:])
 }
 
 func timingLineIndex(lines []string) int {
@@ -51,18 +43,18 @@ func timingLineIndex(lines []string) int {
 	return -1
 }
 
-func cleanDialogue(lines []string) string {
-	spoken := make([]string, 0, len(lines))
+func cleanLines(lines []string) []string {
+	kept := make([]string, 0, len(lines))
 	for _, line := range lines {
 		text := cleanLine(line)
 		if text == "" {
 			continue
 		}
 
-		spoken = append(spoken, text)
+		kept = append(kept, text)
 	}
 
-	return strings.Join(spoken, " ")
+	return kept
 }
 
 func cleanLine(line string) string {

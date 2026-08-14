@@ -160,6 +160,47 @@ file that does not parse is still indexed as flat text rather than failing.
 Chunking is the shared engine at 350 / 40, with sections kept whole and oversized ones split on
 line boundaries.
 
+## Subtitles (`strategy/subtitle`)
+
+A subtitle file is not a transcript. It is a list of on-screen entries, each one an index
+number (SubRip) or optional identifier (WebVTT), a timing line holding `-->`, and the lines
+spoken while it is displayed. SubRip (`.srt`) and WebVTT (`.vtt`) share one strategy because
+they share that shape.
+
+Parsing splits the source on blank lines and, inside each block, takes everything after the
+first timing line. What sits before it is metadata and is dropped, which also removes the
+WebVTT preamble for free: the `WEBVTT` header and any `NOTE`, `STYLE`, or `REGION` block holds
+no timing line, so it yields nothing and needs no special case.
+
+**Only the spoken lines are kept, and they are kept exactly as the file writes them.** Every
+subtitle line stays its own line, in file order, with no empty lines between them. Nothing is
+joined, reordered, or removed, so a line repeated on screen stays repeated: a line held across
+several entries and a line genuinely said twice are indistinguishable in the file, and
+collapsing them would delete real dialogue.
+
+Cleaning is limited to what is not dialogue: markup (`<i>`, `<b>`, the WebVTT `<v Speaker>`
+voice tag, inline timestamps), positioning overrides in braces such as `{\an8}`, and HTML
+entities, which are decoded after the tags are stripped so an escaped `&lt;i&gt;` cannot become
+one.
+
+**Timings are discarded.** They survive neither parsing nor chunking, so a search hit gives the
+dialogue but not when it was said. Carrying them into the chunk title was tried and removed:
+embedding models do not read `01:38:31` as later than `00:00:07`, so queries such as "the
+beginning" or "the second minute" ranked no better than chance, while the timestamps competed
+with real dialogue for room in every vector. Position is better answered by ordering chunks on
+`ChunkIndex` than by asking the vector search.
+
+**The whole file is one section.** Subtitles carry no headings to section on, so `Parse` emits
+a single section and the budget splitter does the real work: a feature-length film becomes one
+section and roughly 25 to 35 chunks. With no heading path, every chunk falls back to the
+file-derived title, exactly as plain text does.
+
+Chunking is inherited unchanged from the general strategy (350 / 50). The transcript arrives as
+a single oversized part, so it is split into sentences and packed to the budget, and overlap
+still applies because it is added to the final chunk list rather than per part. Overlap earns
+its place here, because chunk boundaries fall mid-conversation and a reply separated from its
+setup loses what it was answering.
+
 ## Token estimation
 
 Approximate, not a real tokenizer: `ceil(runeCount / averageTokenLength)` with

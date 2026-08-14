@@ -21,6 +21,7 @@ core/strategy        the per-file contract (Strategy interface) + Pool; concrete
                        strategy/code      code parsing (Chroma lexer) + definition sections
                        strategy/docx      DOCX parsing (zip + XML) + heading sections
                        strategy/html      HTML parsing (x/net/html) + heading sections
+                       strategy/subtitle  SubRip/WebVTT parsing + spoken lines only
 core/storage         resource entities (Document, Chunk, …); no database code
   storage/sqlite     documents + chunks tables — embedded source of truth
   storage/sqlitevec  sqlite-vec vectors — embedded
@@ -78,7 +79,15 @@ Embed(ctx, chunks) ([][]float32, error)
   model, and script, style, and navigation subtrees are dropped). It inherits chunking,
   metadata, fingerprint, and embed. See [chunking.md](chunking.md).
 
-Markdown, PDF, Code, DOCX, and HTML **embed** `GeneralStrategy` (Go composition, not inheritance), reusing its
+- **`subtitle`** overrides `Claims` (`.srt`, `.vtt`) and `Parse` (blocks are split on blank
+  lines and the first line holding `-->` separates timing metadata from the spoken lines, so
+  index numbers, WebVTT identifiers, and the `WEBVTT` header and `NOTE` blocks drop out with no
+  special case). Only the spoken lines are kept, each on its own line in file order, as one
+  section: subtitles carry no headings to section on, and timings are discarded because a
+  timestamp is not a subject. It inherits chunking, metadata, fingerprint, and embed. See
+  [chunking.md](chunking.md).
+
+Markdown, PDF, Code, DOCX, HTML, and Subtitle **embed** `GeneralStrategy` (Go composition, not inheritance), reusing its
 methods without proxy code and overriding only what their format needs. The embedder is
 injected, because embedding is an operation the strategy owns — though the pipeline batches it
 across files (see *Embedding*). A `Pool` holds the strategies; `Pool.For(path)` returns the
