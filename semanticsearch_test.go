@@ -386,6 +386,7 @@ func TestStrategyFactoriesBuild(t *testing.T) {
 		NewHTMLStrategy(),
 		NewConfigStrategy(),
 		NewSubtitleStrategy(),
+		NewEPUBStrategy(),
 		NewTextStrategy(),
 	}
 	for _, factory := range factories {

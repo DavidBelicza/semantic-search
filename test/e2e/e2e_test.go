@@ -89,6 +89,7 @@ func newEngine(t *testing.T, store storage.Storage, vectors storage.VectorStorag
 			semanticsearch.NewHTMLStrategy(),
 			semanticsearch.NewConfigStrategy(),
 			semanticsearch.NewSubtitleStrategy(),
+			semanticsearch.NewEPUBStrategy(),
 		},
 	})
 	if err != nil {
@@ -120,6 +121,8 @@ func assertRetrieval(t *testing.T, engine *semanticsearch.Engine, dir string) {
 		{"hostname of the reporting warehouse", "warehouse"},           // → service.yaml
 		{"how far does the glacier retreat each summer", "glacier"},    // → lecture.srt
 		{"how often should the sourdough starter be fed", "sourdough"}, // → interview.vtt
+		{"what causes the tidal bore on the estuary", "bore"},          // → almanac.epub
+		{"how deep can the harbour take a loaded vessel", "draught"},   // → almanac.epub
 	}
 
 	for _, tc := range cases {
@@ -137,6 +140,7 @@ func assertRetrieval(t *testing.T, engine *semanticsearch.Engine, dir string) {
 	}
 
 	assertSubtitleMetadataStripped(t, engine)
+	assertEPUBStructure(t, engine)
 }
 
 func assertSubtitleMetadataStripped(t *testing.T, engine *semanticsearch.Engine) {
@@ -242,6 +246,7 @@ func writeFixtures(t *testing.T, dir string) {
 	write(t, dir, "interview.vtt", "WEBVTT\n\nNOTE recorded in the kitchen studio\n\n"+
 		"opening\n00:00:02.000 --> 00:00:06.000\n<v Baker>You feed the <i>sourdough</i> starter twice a day.\n\n"+
 		"00:00:06.500 --> 00:00:09.000\n{\\an8}Warm water works best.\n")
+	writeEPUB(t, filepath.Join(dir, "almanac.epub"))
 }
 
 func write(t *testing.T, dir, name, content string) {
@@ -271,5 +276,155 @@ func writeDocx(t *testing.T, path, body string) {
 	}
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		t.Fatalf("write docx: %v", err)
+	}
+}
+
+func assertEPUBStructure(t *testing.T, engine *semanticsearch.Engine) {
+	t.Helper()
+	ctx := context.Background()
+
+	results, err := engine.Search(ctx, semanticsearch.SearchConfig{Query: "what causes the tidal bore on the estuary"})
+	if err != nil {
+		t.Fatalf("search epub: %v", err)
+	}
+	if len(results) == 0 || len(results[0].Chunks) == 0 {
+		t.Fatalf("epub query: no results")
+	}
+	if results[0].FileName != "almanac.epub" {
+		t.Fatalf("expected the epub document, got %q", results[0].FileName)
+	}
+
+	top := results[0].Chunks[0]
+	if top.Title != "Harbour Almanac > Tides > The Estuary Bore" {
+		t.Errorf("expected the nested heading path as the title, got %q", top.Title)
+	}
+	for _, unwanted := range []string{"<", "&amp;", "&nbsp;", "epub:type", "Skip to content", "printed page 12", "hidden colophon"} {
+		if strings.Contains(top.Text, unwanted) {
+			t.Errorf("epub chunk still carries %q: %q", unwanted, top.Text)
+		}
+	}
+	if !strings.Contains(top.Text, "A chart of the estuary at spring tide") {
+		t.Errorf("expected image alternative text kept, got %q", top.Text)
+	}
+	if !strings.Contains(top.Text, "Measured from the lifeboat slip") {
+		t.Errorf("expected aside content kept, got %q", top.Text)
+	}
+
+	assertEPUBSpineOrder(t, engine)
+}
+
+func assertEPUBSpineOrder(t *testing.T, engine *semanticsearch.Engine) {
+	t.Helper()
+
+	results, err := engine.Search(context.Background(), semanticsearch.SearchConfig{
+		Query:     "estuary bore draught harbour tides berths",
+		MaxChunks: 20,
+	})
+	if err != nil {
+		t.Fatalf("search epub order: %v", err)
+	}
+
+	var titles []string
+	for _, document := range results {
+		if document.FileName != "almanac.epub" {
+			continue
+		}
+		for _, chunk := range document.Chunks {
+			titles = append(titles, chunk.Title)
+		}
+	}
+
+	joined := strings.Join(titles, " | ")
+	if !strings.Contains(joined, "Tides") || !strings.Contains(joined, "Berths") {
+		t.Fatalf("expected both spine documents indexed, got %q", joined)
+	}
+	if strings.Contains(joined, "Table of Contents") {
+		t.Errorf("the navigation document should not be indexed, got %q", joined)
+	}
+}
+
+// writeEPUB builds a minimal EPUB: an OCF container pointing at a package document whose spine
+// lists two content documents plus a navigation document that must not be indexed.
+func writeEPUB(t *testing.T, path string) {
+	t.Helper()
+
+	container := `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/package.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>`
+
+	pkg := `<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <metadata><title>Harbour Almanac</title></metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="tides" href="text/tides.xhtml" media-type="application/xhtml+xml"/>
+    <item id="berths" href="text/berths.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="nav"/>
+    <itemref idref="tides"/>
+    <itemref idref="berths"/>
+  </spine>
+</package>`
+
+	nav := `<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Table of Contents</title></head>
+<body>
+<h1>Table of Contents</h1>
+<p>A listing of the almanac chapters.</p>
+<nav epub:type="toc"><ol><li><a href="text/tides.xhtml">Tides</a></li><li><a href="text/berths.xhtml">Berths</a></li></ol></nav>
+</body></html>`
+
+	tides := `<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>Tides</title></head>
+<body>
+  <nav><a href="#main">Skip to content</a></nav>
+  <h1>Harbour Almanac</h1>
+  <h2>Tides</h2>
+  <h3>The Estuary Bore</h3>
+  <span epub:type="pagebreak">printed page 12</span>
+  <p>A steep tidal bore runs up the estuary when a spring tide meets the river current.</p>
+  <p><img src="chart.png" alt="A chart of the estuary at spring tide"/></p>
+  <aside><p>Measured from the lifeboat slip on the eastern shore.</p></aside>
+  <p hidden>hidden colophon</p>
+</body></html>`
+
+	berths := `<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Berths</title></head>
+<body>
+  <h1>Harbour Almanac</h1>
+  <h2>Berths</h2>
+  <p>The inner harbour takes a loaded vessel of six metres draught at any state of the tide.</p>
+  <footer><p>Soundings corrected to chart datum.</p></footer>
+</body></html>`
+
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+	parts := []struct{ name, content string }{
+		{"mimetype", "application/epub+zip"},
+		{"META-INF/container.xml", container},
+		{"OEBPS/package.opf", pkg},
+		{"OEBPS/nav.xhtml", nav},
+		{"OEBPS/text/tides.xhtml", tides},
+		{"OEBPS/text/berths.xhtml", berths},
+	}
+	for _, part := range parts {
+		writer, err := zw.Create(part.name)
+		if err != nil {
+			t.Fatalf("create epub part %s: %v", part.name, err)
+		}
+		if _, err := writer.Write([]byte(part.content)); err != nil {
+			t.Fatalf("write epub part %s: %v", part.name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close epub: %v", err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write epub: %v", err)
 	}
 }

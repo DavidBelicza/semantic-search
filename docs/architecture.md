@@ -1,7 +1,7 @@
 # Architecture
 
 A Go library for semantic search over a directory of files (Markdown, PDF, code, DOCX, HTML,
-plain text). Files are discovered, chunked, and embedded through an OpenAI-compatible model server,
+config, subtitles, EPUB, plain text). Files are discovered, chunked, and embedded through an OpenAI-compatible model server,
 then stored either embedded in SQLite or server-side in PostgreSQL. Search embeds the query,
 ranks chunks by vector similarity, and returns the matching documents.
 
@@ -22,6 +22,8 @@ core/strategy        the per-file contract (Strategy interface) + Pool; concrete
                        strategy/docx      DOCX parsing (zip + XML) + heading sections
                        strategy/html      HTML parsing (x/net/html) + heading sections
                        strategy/subtitle  SubRip/WebVTT parsing + spoken lines only
+                       strategy/epub      OCF container + spine order, via strategy/markup
+                       strategy/markup    shared HTML-family extractor (web + publication)
 core/storage         resource entities (Document, Chunk, …); no database code
   storage/sqlite     documents + chunks tables — embedded source of truth
   storage/sqlitevec  sqlite-vec vectors — embedded
@@ -38,7 +40,8 @@ core/embedder
 Rule of thumb: `internal/*` and `core/*` provide the parts; the root `semanticsearch` package
 assembles them into an `Engine` that callers drive. Dependencies point downward: `textproc` and
 `storage` depend on nothing of ours; strategies depend on both; the pipeline depends on the
-strategy contract.
+strategy contract. No strategy imports another: `html` and `epub` share HTML-family parsing
+through `strategy/markup`, which is a helper package rather than a strategy.
 
 ## Strategy — the per-file recipe
 
@@ -78,7 +81,6 @@ Embed(ctx, chunks) ([][]float32, error)
   reads text nodes only, so tags never reach the index; `<h1>`-`<h6>` map onto the heading-path
   model, and script, style, and navigation subtrees are dropped). It inherits chunking,
   metadata, fingerprint, and embed. See [chunking.md](chunking.md).
-
 - **`subtitle`** overrides `Claims` (`.srt`, `.vtt`) and `Parse` (blocks are split on blank
   lines and the first line holding `-->` separates timing metadata from the spoken lines, so
   index numbers, WebVTT identifiers, and the `WEBVTT` header and `NOTE` blocks drop out with no
@@ -86,8 +88,14 @@ Embed(ctx, chunks) ([][]float32, error)
   section: subtitles carry no headings to section on, and timings are discarded because a
   timestamp is not a subject. It inherits chunking, metadata, fingerprint, and embed. See
   [chunking.md](chunking.md).
+- **`epub`** overrides `Claims` (`.epub`) and `Parse`. It reads the OCF container to find the
+  package document, follows the spine for reading order, resolves manifest fallbacks, and skips
+  the navigation document; each content document goes through `strategy/markup` in publication
+  mode, so chapters map onto the shared heading-path model. A malformed spine or manifest entry
+  is skipped rather than failing the book, and archive size is bounded. It inherits chunking,
+  metadata, fingerprint, and embed. See [chunking.md](chunking.md).
 
-Markdown, PDF, Code, DOCX, HTML, and Subtitle **embed** `GeneralStrategy` (Go composition, not inheritance), reusing its
+Every concrete strategy **embeds** `GeneralStrategy` (Go composition, not inheritance), reusing its
 methods without proxy code and overriding only what their format needs. The embedder is
 injected, because embedding is an operation the strategy owns — though the pipeline batches it
 across files (see *Embedding*). A `Pool` holds the strategies; `Pool.For(path)` returns the
