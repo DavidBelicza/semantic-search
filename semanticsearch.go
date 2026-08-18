@@ -24,6 +24,7 @@ import (
 	"github.com/davidbelicza/semantic-search/core/strategy/code"
 	configstrategy "github.com/davidbelicza/semantic-search/core/strategy/config"
 	"github.com/davidbelicza/semantic-search/core/strategy/docx"
+	"github.com/davidbelicza/semantic-search/core/strategy/epub"
 	"github.com/davidbelicza/semantic-search/core/strategy/general"
 	"github.com/davidbelicza/semantic-search/core/strategy/html"
 	"github.com/davidbelicza/semantic-search/core/strategy/markdown"
@@ -418,6 +419,17 @@ func NewDocxStrategy() StrategyFactory {
 		Extensions: []string{".docx"},
 		Build: func(model strategy.EmbeddingModel, embedder strategy.AiClient) (strategy.Strategy, func() error, error) {
 			return docx.NewDocxStrategy(general.NewGeneralStrategy(model, embedder)), nil, nil
+		},
+	}
+}
+
+// NewEPUBStrategy registers the EPUB strategy. It follows the publication spine and extracts
+// readable XHTML/SVG content in reading order.
+func NewEPUBStrategy() StrategyFactory {
+	return StrategyFactory{
+		Extensions: []string{".epub"},
+		Build: func(model strategy.EmbeddingModel, embedder strategy.AiClient) (strategy.Strategy, func() error, error) {
+			return epub.NewEPUBStrategy(general.NewGeneralStrategy(model, embedder)), nil, nil
 		},
 	}
 }
