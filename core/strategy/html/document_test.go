@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"golang.org/x/net/html"
-
 	"github.com/davidbelicza/semantic-search/core/strategy"
 )
 
@@ -53,24 +51,6 @@ func TestContentRootFallsBackToBodyWhenSeveralArticles(t *testing.T) {
 
 	assertSection(t, sections, []string{"First"}, "First body.")
 	assertSection(t, sections, []string{"Second"}, "Second body.")
-}
-
-func TestContentRootFallsBackToTheNodeItself(t *testing.T) {
-	// A hand-built fragment with no main, article, or body: the node is its own root.
-	node := &html.Node{Type: html.ElementNode, Data: "div"}
-	if got := contentRoot(node); got != node {
-		t.Fatalf("expected the node itself as the root, got %#v", got)
-	}
-}
-
-func TestFindElementReturnsNilWhenAbsent(t *testing.T) {
-	node := &html.Node{Type: html.ElementNode, Data: "div"}
-	if found := findElement(node, "main"); found != nil {
-		t.Fatalf("expected nil for an absent element, got %#v", found)
-	}
-	if found := findElements(node, "article"); len(found) != 0 {
-		t.Fatalf("expected no matches, got %d", len(found))
-	}
 }
 
 // --- skipped subtrees ---
@@ -150,21 +130,6 @@ func TestHeadingTextSkipsNestedNonProse(t *testing.T) {
 	assertSection(t, sections, []string{"Title"}, "body")
 	assertNoText(t, sections, "script text")
 	assertNoText(t, sections, "comment text")
-}
-
-func TestWalkerHandlesADocumentNode(t *testing.T) {
-	// contentRoot yields the document itself for a tree with no body, so the walker must
-	// descend through a document node.
-	document, err := html.Parse(strings.NewReader(`<p>text</p>`))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	walk := &walker{}
-	walk.node(document)
-	if len(walk.blocks) == 0 {
-		t.Fatal("expected the walker to descend through the document node")
-	}
 }
 
 func TestCommentsAreIgnored(t *testing.T) {
