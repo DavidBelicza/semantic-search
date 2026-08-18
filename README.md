@@ -76,6 +76,7 @@ on disk or in memory) and as a server-side knowledge base (using PostgreSQL and 
 | HTML | `.html`, `.htm`, `.xhtml` | Text extracted from the HTML and split by `<h1>`-`<h6>` headings, with scripts, styles, and navigation dropped |
 | Config | `.json`, `.xml`, `.yaml`, `.yml`, `.ini`, `.properties` | Split by key path, so each chunk is titled with the setting it holds; comments are kept |
 | Subtitles | `.srt`, `.vtt` | The full dialogue becomes searchable text, split into chunks, so a film or talk reads like a book you can search by meaning |
+| eBooks | `.epub` | Split by chapter, in reading order, so each result carries the chapter it belongs to |
 
 ## How it works
 
@@ -101,7 +102,7 @@ flowchart TD
         Search[Search flow]
     end
 
-    Index --> Strategies[Strategies<br/>Markdown · PDF · Code · Text · DOCX]
+    Index --> Strategies[Strategies<br/>Markdown · PDF · Code · Text · DOCX<br/>HTML · Config · Subtitles · EPUB]
     Search --> Model
     Strategies --> Model[Embedding model<br/>prompt templates]
     Model --> Client[AI client<br/>OpenAI-compatible transport]
@@ -231,6 +232,7 @@ func main() {
 			semanticsearch.NewHTMLStrategy(),
 			semanticsearch.NewConfigStrategy(),
 			semanticsearch.NewSubtitleStrategy(),
+			semanticsearch.NewEPUBStrategy(),
 			semanticsearch.NewTextStrategy(),
 		},
 	})

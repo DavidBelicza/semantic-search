@@ -19,7 +19,7 @@ Status: **done** / **todo** (partial = base exists, needs wiring).
 | Config | `.json`, `.xml`, `.yaml`, `.yml`, `.ini`, `.properties` | - | done | stdlib `encoding/json`, `encoding/xml`, line parser (`.ini`/`.properties`) + `go.yaml.in/yaml/v3`; one tree, key-path sections |
 | CSV / TSV | `.csv`, `.tsv` | P2 | todo | stdlib `encoding/csv` |
 | XLSX | `.xlsx` | P3 | todo | `github.com/xuri/excelize/v2` (BSD); or stdlib `archive/zip` + `encoding/xml` |
-| EPUB | `.epub` | P3 | todo | stdlib `archive/zip` + `golang.org/x/net/html`; alt `github.com/taylorskalyo/goreader` |
+| EPUB | `.epub` | - | done | stdlib `archive/zip` + `golang.org/x/net/html` (spine order, heading sections via the shared `strategy/markup` extractor) |
 | Subtitles | `.srt`, `.vtt` | - | done | stdlib only (spoken lines kept in file order, one transcript section) |
 
 ## Facade configuration roadmap

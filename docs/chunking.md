@@ -27,9 +27,26 @@ For each section:
 Each chunk records a content hash of `title + "\n" + text`, used for change detection during
 reconciliation.
 
+## The shared markup extractor (`strategy/markup`)
+
+HTML and EPUB both read HTML-family documents, so the walker lives in one place and neither
+strategy depends on the other. A `Mode` selects the policy:
+
+| | Web mode (HTML) | Publication mode (EPUB) |
+|---|---|---|
+| Root | `<main>`, else a lone `<article>`, else the body | the whole body |
+| `aside`, `footer` | dropped as page furniture | kept, they carry notes |
+| `svg` | dropped | kept, fixed-layout pages hold text in it |
+| `img` | ignored | `alt` text is read |
+| `hidden`, `aria-hidden`, page breaks | not special | dropped |
+| Document title | not reported | from `<head>`, else a standalone SVG title |
+
+Everything else is shared: the tolerant parser, the block and inline rules, whitespace
+collapsing, preformatted handling, and the heading stack.
+
 ## The shared sectionizer (`strategy/general`)
 
-Every heading-based format (Markdown, PDF, DOCX, HTML) assembles its sections with the same
+Every heading-based format (Markdown, PDF, DOCX, HTML, EPUB) assembles its sections with the same
 `Sectionizer`: it is fed a stream of headings and body paragraphs, and keeps the heading stack
 so each section carries its full path.
 
@@ -200,6 +217,37 @@ a single oversized part, so it is split into sentences and packed to the budget,
 still applies because it is added to the final chunk list rather than per part. Overlap earns
 its place here, because chunk boundaries fall mid-conversation and a reply separated from its
 setup loses what it was answering.
+
+## EPUB (`strategy/epub`)
+
+An EPUB is a ZIP container, not a single document. `META-INF/container.xml` names the package
+document, the package document's manifest lists every resource, and its spine gives the reading
+order. The strategy follows that chain rather than guessing at filenames, so chapters arrive in
+the order the book declares.
+
+Each spine item resolves through the manifest, following `fallback` chains (with cycle
+detection) until a readable media type is found. XHTML, HTML, and SVG content documents are
+read; anything else is skipped. The navigation document is skipped by its `nav` property, since
+indexing it would duplicate the table of contents as prose. Non-linear spine items are kept:
+notes, answer keys, and appendices are still part of the book.
+
+Content documents go through the shared `strategy/markup` extractor in publication mode, so
+heading structure maps onto the same heading-path model every other format uses. A chunk from a
+novel is titled with its chapter, for example `MOBY-DICK; or, THE WHALE. > CHAPTER 60. The
+Line.`, which is what makes a hit locatable. When a content document has no heading of its own,
+its `<title>`, else the publication title, else the file name supplies the path.
+
+**Parsing is tolerant, as everywhere else.** A malformed spine entry, an unresolvable href, or a
+chapter that fails to parse is skipped and the rest of the book is indexed. Extraction only
+fails when nothing at all could be read. Real EPUBs are frequently sloppy, and one bad chapter
+should not cost the other forty.
+
+**Reading is bounded**, unlike the other formats. A cap on archive entries, a per-entry size
+limit, and a total extraction budget keep a decompression bomb from exhausting memory. Encrypted
+content documents are reported rather than indexed as ciphertext, and every stored path is
+normalized and checked so an entry cannot escape the container.
+
+Chunking is inherited unchanged from the general strategy (350 / 50).
 
 ## Token estimation
 
