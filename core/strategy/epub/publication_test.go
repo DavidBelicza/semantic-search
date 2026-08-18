@@ -769,3 +769,66 @@ func TestEntryWhoseRecordedSizeDisagreesWithItsDataIsRejected(t *testing.T) {
 		t.Fatal("expected an entry whose recorded size disagrees with its data to be rejected")
 	}
 }
+
+type failingReader struct {
+	remaining int
+}
+
+func (r *failingReader) Read(p []byte) (int, error) {
+	if r.remaining <= 0 {
+		return 0, errString("reader failed")
+	}
+
+	n := len(p)
+	if n > r.remaining {
+		n = r.remaining
+	}
+	for i := 0; i < n; i++ {
+		p[i] = ' '
+	}
+	r.remaining -= n
+
+	return n, nil
+}
+
+func TestReadLimitedRejectsOversizedContent(t *testing.T) {
+	if _, err := readLimited(strings.NewReader("a longer body than allowed"), "a.xhtml", 4); err == nil {
+		t.Fatal("expected content past the limit to be rejected")
+	}
+	if data, err := readLimited(strings.NewReader("tiny"), "a.xhtml", 64); err != nil || string(data) != "tiny" {
+		t.Fatalf("got %q err=%v", data, err)
+	}
+}
+
+func TestReadLimitedReportsReaderFailures(t *testing.T) {
+	if _, err := readLimited(&failingReader{}, "a.xhtml", 64); err == nil {
+		t.Fatal("expected a read failure to be reported")
+	}
+}
+
+func TestExtractFromReaderReportsDecodeFailures(t *testing.T) {
+	_, err := extractFromReader(&failingReader{}, xhtmlMediaType, "text/one.xhtml", "Waterworks")
+	if err == nil || !contains(err.Error(), "decode EPUB content") {
+		t.Fatalf("expected a decode failure, got %v", err)
+	}
+}
+
+func TestExtractFromReaderReportsParseFailures(t *testing.T) {
+	_, err := extractFromReader(&failingReader{remaining: 1024}, xhtmlMediaType, "text/one.xhtml", "Waterworks")
+	if err == nil || !contains(err.Error(), "parse EPUB content") {
+		t.Fatalf("expected a parse failure, got %v", err)
+	}
+}
+
+func TestEmptyContentDocumentIsReportedNotIndexed(t *testing.T) {
+	pkg := `<package>
+  <manifest><item id="one" href="one.xhtml" media-type="application/xhtml+xml"/></manifest>
+  <spine><itemref idref="one"/></spine>
+</package>`
+
+	expectError(t, "no readable spine content",
+		containerFor("package.opf"),
+		archivePart{"package.opf", pkg},
+		archivePart{"one.xhtml", ""},
+	)
+}

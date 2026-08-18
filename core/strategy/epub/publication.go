@@ -226,12 +226,18 @@ func readArchiveFile(file *zip.File, limit uint64) ([]byte, error) {
 	}
 	defer reader.Close()
 
+	return readLimited(reader, file.Name, limit)
+}
+
+// readLimited reads at most limit bytes, treating anything longer as an entry that outgrew the
+// size its archive recorded.
+func readLimited(reader io.Reader, name string, limit uint64) ([]byte, error) {
 	data, err := io.ReadAll(io.LimitReader(reader, int64(limit)+1))
 	if err != nil {
-		return nil, fmt.Errorf("read EPUB entry %q: %w", file.Name, err)
+		return nil, fmt.Errorf("read EPUB entry %q: %w", name, err)
 	}
 	if uint64(len(data)) > limit {
-		return nil, fmt.Errorf("EPUB entry %q exceeds the %d-byte extraction limit", file.Name, limit)
+		return nil, fmt.Errorf("EPUB entry %q exceeds the %d-byte extraction limit", name, limit)
 	}
 
 	return data, nil
@@ -479,17 +485,24 @@ func extractContentDocument(archive *publicationArchive, resourcePath string, it
 		return nil, err
 	}
 
-	reader, err := htmlcharset.NewReader(bytes.NewReader(content), item.mediaType)
+	return extractFromReader(bytes.NewReader(content), item.mediaType, resourcePath, publicationTitle)
+}
+
+// extractFromReader decodes one content document to text and sections it. It takes a reader so
+// the decode and parse failures stay reachable independently of the archive.
+func extractFromReader(reader io.Reader, mediaType, resourcePath, publicationTitle string) ([]strategy.Section, error) {
+	decoded, err := htmlcharset.NewReader(reader, mediaType)
 	if err != nil {
 		return nil, fmt.Errorf("decode EPUB content %q: %w", resourcePath, err)
 	}
 
-	document, err := markup.Extract(reader, markup.PublicationMode)
+	document, err := markup.Extract(decoded, markup.PublicationMode)
 	if err != nil {
 		return nil, fmt.Errorf("parse EPUB content %q: %w", resourcePath, err)
 	}
 
 	label := contentLabel(document.Title, publicationTitle, resourcePath)
+
 	return addFallbackPath(document.Sections, label), nil
 }
 
@@ -595,10 +608,7 @@ func resolveReference(baseFile, reference string) (resolved string, external boo
 		return "", false, fmt.Errorf("reference has no path")
 	}
 
-	decoded, err := url.PathUnescape(parsed.EscapedPath())
-	if err != nil {
-		return "", false, err
-	}
+	decoded := parsed.Path
 	if strings.Contains(decoded, "\\") || strings.ContainsRune(decoded, '\x00') {
 		return "", false, fmt.Errorf("invalid container path %q", decoded)
 	}
